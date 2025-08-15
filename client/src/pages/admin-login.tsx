@@ -6,7 +6,14 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { AdminLoginData, adminLoginSchema } from "@shared/schema";
+import { z } from "zod";
+
+const adminLoginSchema = z.object({
+  username: z.string().min(1, "Username is required"),
+  password: z.string().min(1, "Password is required"),
+});
+
+type AdminLoginData = z.infer<typeof adminLoginSchema>;
 import { Loader2, Shield } from "lucide-react";
 
 export default function AdminLogin() {
@@ -17,7 +24,6 @@ export default function AdminLogin() {
     defaultValues: {
       username: "bediAdmin",
       password: "",
-      audioPassword: "",
     },
   });
 
@@ -99,28 +105,6 @@ export default function AdminLogin() {
                   )}
                 />
 
-                <FormField
-                  control={form.control}
-                  name="audioPassword"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Audio Access Password (Optional)</FormLabel>
-                      <FormControl>
-                        <Input 
-                          type="password"
-                          placeholder="audioAccess2025"
-                          {...field}
-                          data-testid="input-audio-password"
-                          className="px-4 py-3"
-                        />
-                      </FormControl>
-                      <FormMessage />
-                      <p className="text-xs text-gray-500">
-                        Leave empty for standard admin access only
-                      </p>
-                    </FormItem>
-                  )}
-                />
 
                 <Button 
                   type="submit" 

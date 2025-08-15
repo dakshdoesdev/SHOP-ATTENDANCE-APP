@@ -1,19 +1,16 @@
-import { useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { Redirect } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { LoginData, InsertUser, loginSchema, insertUserSchema } from "@shared/schema";
+import { LoginData, loginSchema } from "@shared/schema";
 import { Loader2, Building2 } from "lucide-react";
 
 export default function AuthPage() {
-  const { user, isLoading, loginMutation, registerMutation } = useAuth();
-  const [activeTab, setActiveTab] = useState("login");
+  const { user, isLoading, loginMutation } = useAuth();
 
   const loginForm = useForm<LoginData>({
     resolver: zodResolver(loginSchema),
@@ -23,18 +20,6 @@ export default function AuthPage() {
     },
   });
 
-  const registerForm = useForm<InsertUser>({
-    resolver: zodResolver(insertUserSchema.extend({
-      confirmPassword: insertUserSchema.shape.password,
-    })),
-    defaultValues: {
-      username: "",
-      password: "",
-      role: "employee",
-      employeeId: "",
-      department: "",
-    },
-  });
 
   // Redirect if already logged in (after hook calls)
   if (user) {
@@ -53,16 +38,6 @@ export default function AuthPage() {
     loginMutation.mutate(data);
   };
 
-  const onRegisterSubmit = (data: any) => {
-    const { confirmPassword, ...registerData } = data;
-    if (data.password !== confirmPassword) {
-      registerForm.setError("confirmPassword", {
-        message: "Passwords do not match",
-      });
-      return;
-    }
-    registerMutation.mutate(registerData);
-  };
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
@@ -79,13 +54,7 @@ export default function AuthPage() {
               </p>
             </CardHeader>
             <CardContent>
-              <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="login">Login</TabsTrigger>
-                  <TabsTrigger value="register">Register</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="login" className="space-y-4">
+              <div className="space-y-4">
                   <Form {...loginForm}>
                     <form onSubmit={loginForm.handleSubmit(onLoginSubmit)} className="space-y-4">
                       <FormField
@@ -136,116 +105,7 @@ export default function AuthPage() {
                       </Button>
                     </form>
                   </Form>
-                </TabsContent>
-
-                <TabsContent value="register" className="space-y-4">
-                  <Form {...registerForm}>
-                    <form onSubmit={registerForm.handleSubmit(onRegisterSubmit)} className="space-y-4">
-                      <FormField
-                        control={registerForm.control}
-                        name="username"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Username</FormLabel>
-                            <FormControl>
-                              <Input 
-                                placeholder="Enter username" 
-                                {...field}
-                                data-testid="input-register-username"
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <FormField
-                        control={registerForm.control}
-                        name="employeeId"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Employee ID</FormLabel>
-                            <FormControl>
-                              <Input 
-                                placeholder="Enter employee ID" 
-                                {...field}
-                                data-testid="input-employee-id"
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <FormField
-                        control={registerForm.control}
-                        name="department"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Department</FormLabel>
-                            <FormControl>
-                              <Input 
-                                placeholder="Enter department" 
-                                {...field}
-                                data-testid="input-department"
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <FormField
-                        control={registerForm.control}
-                        name="password"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Password</FormLabel>
-                            <FormControl>
-                              <Input 
-                                type="password" 
-                                placeholder="Enter password" 
-                                {...field}
-                                data-testid="input-register-password"
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <FormField
-                        control={registerForm.control}
-                        name="confirmPassword"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Confirm Password</FormLabel>
-                            <FormControl>
-                              <Input 
-                                type="password" 
-                                placeholder="Confirm password" 
-                                {...field}
-                                data-testid="input-confirm-password"
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <Button 
-                        type="submit" 
-                        className="w-full bg-primary hover:bg-blue-700"
-                        disabled={registerMutation.isPending}
-                        data-testid="button-register"
-                      >
-                        {registerMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        Register
-                      </Button>
-                    </form>
-                  </Form>
-                </TabsContent>
-              </Tabs>
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -269,7 +129,7 @@ export default function AuthPage() {
               </li>
               <li className="flex items-center">
                 <div className="w-2 h-2 bg-white rounded-full mr-3"></div>
-                Comprehensive reporting
+                Admin-managed accounts
               </li>
               <li className="flex items-center">
                 <div className="w-2 h-2 bg-white rounded-full mr-3"></div>

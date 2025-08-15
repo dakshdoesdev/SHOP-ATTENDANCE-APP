@@ -64,10 +64,30 @@ export function setupAuth(app: Express) {
   passport.serializeUser((user, done) => done(null, user.id));
   passport.deserializeUser(async (id: string, done) => {
     try {
+      // Handle admin user separately since it's not in database
+      if (id === "admin-user") {
+        const adminUser: SelectUser = {
+          id: "admin-user",
+          username: "bediAdmin",
+          password: "",
+          role: "admin",
+          employeeId: null,
+          department: null,
+          joinDate: null,
+          isActive: true,
+          createdAt: null,
+        };
+        return done(null, adminUser);
+      }
+      
       const user = await storage.getUser(id);
+      if (!user) {
+        return done(null, false);
+      }
       done(null, user);
     } catch (error) {
-      done(error);
+      console.error('Deserialize user error:', error);
+      done(null, false); // Don't throw error, just return false
     }
   });
 

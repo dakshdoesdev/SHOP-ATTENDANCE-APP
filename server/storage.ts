@@ -25,6 +25,7 @@ export interface IStorage {
   getAudioRecordingsByUserId(userId: string): Promise<AudioRecording[]>;
   getAllAudioRecordings(): Promise<(AudioRecording & { user: User })[]>;
   getActiveAudioRecordings(): Promise<(AudioRecording & { user: User })[]>;
+  deleteAudioRecordingByFileName(fileName: string): Promise<void>;
   deleteOldAudioRecordings(daysOld: number): Promise<void>;
   
   // Admin methods
@@ -186,6 +187,12 @@ export class DatabaseStorage implements IStorage {
       .from(audioRecordings)
       .innerJoin(users, eq(audioRecordings.userId, users.id))
       .where(eq(audioRecordings.isActive, true));
+  }
+
+  async deleteAudioRecordingByFileName(fileName: string): Promise<void> {
+    await db
+      .delete(audioRecordings)
+      .where(eq(audioRecordings.fileName, fileName));
   }
 
   async deleteOldAudioRecordings(daysOld: number): Promise<void> {

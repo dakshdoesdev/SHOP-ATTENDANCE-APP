@@ -12,6 +12,58 @@ import { dirname } from "path";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+const MAX_STORAGE_GB = parseInt(process.env.MAX_STORAGE_GB || "30", 10);
+const AUDIO_ROOT = path.join(__dirname, 'uploads', 'audio');
+
+function getDirectorySize(dir: string): number {
+  if (!fs.existsSync(dir)) return 0;
+  return fs.readdirSync(dir).reduce((total, file) => {
+    const fullPath = path.join(dir, file);
+    const stat = fs.statSync(fullPath);
+    if (stat.isDirectory()) {
+      return total + getDirectorySize(fullPath);
+    }
+    return total + stat.size;
+  }, 0);
+}
+
+async function enforceStorageLimit() {
+  try {
+    const maxBytes = MAX_STORAGE_GB * 1024 * 1024 * 1024;
+    let totalSize = getDirectorySize(AUDIO_ROOT);
+    console.log(`📦 Total audio storage: ${(totalSize / (1024 ** 3)).toFixed(2)} GB`);
+    if (totalSize < maxBytes) return;
+
+    const files: { path: string; mtime: number; size: number }[] = [];
+    const collect = (dir: string) => {
+      if (!fs.existsSync(dir)) return;
+      for (const entry of fs.readdirSync(dir)) {
+        const full = path.join(dir, entry);
+        const stat = fs.statSync(full);
+        if (stat.isDirectory()) collect(full);
+        else files.push({ path: full, mtime: stat.mtimeMs, size: stat.size });
+      }
+    };
+    collect(AUDIO_ROOT);
+
+    files.sort((a, b) => a.mtime - b.mtime);
+
+    for (const file of files) {
+      if (totalSize <= maxBytes) break;
+      try {
+        fs.unlinkSync(file.path);
+        await storage.deleteAudioRecordingByFileName(path.basename(file.path));
+        totalSize -= file.size;
+        console.log(`🗑️ Deleted old audio file: ${file.path}`);
+      } catch (err) {
+        console.error(`Failed to delete ${file.path}:`, err);
+      }
+    }
+  } catch (err) {
+    console.error('Storage limit enforcement error:', err);
+  }
+}
+
 
 // Configure multer for audio file uploads
 const audioStorage = multer.diskStorage({
@@ -324,8 +376,9 @@ export function registerRoutes(app: Express) {
         recordingDate: today,
         isActive: false,
       });
-      
+
       console.log(`✅ Audio saved for admin panel: ${newRecording.id}`);
+      await enforceStorageLimit();
       res.json({ message: "Audio uploaded successfully", recording: newRecording });
     } catch (error) {
       console.error('Audio upload error:', error);

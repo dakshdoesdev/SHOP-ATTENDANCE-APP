@@ -108,7 +108,12 @@ export function registerRoutes(app: Express): Server {
       }
 
       const checkOutTime = new Date();
-      const isEarlyLeave = checkOutTime.getHours() < 21 || (checkOutTime.getHours() === 21 && checkOutTime.getMinutes() < 0);
+      // Mark as early leave if the employee checks out before 9:00 PM.
+      // The previous implementation attempted to check minutes using
+      // `getMinutes() < 0`, which is always false and therefore
+      // failed to mark 21:00 check-outs correctly. Simplify the
+      // logic to just compare the hour component.
+      const isEarlyLeave = checkOutTime.getHours() < 21;
       
       // Calculate hours worked
       const hoursWorked = (checkOutTime.getTime() - existingRecord.checkInTime.getTime()) / (1000 * 60 * 60);

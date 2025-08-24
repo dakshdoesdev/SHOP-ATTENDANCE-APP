@@ -1,15 +1,41 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
-import { setupAuth } from "./auth";
+import { hashPassword } from "./auth";
 import { storage } from "./storage";
-import { z } from "zod";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
+import { dirname } from "path";
 
-export function registerRoutes(app: Express): Server {
-  setupAuth(app);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
+
+// Configure multer for audio file uploads
+const audioStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const userId = req.user?.id || 'unknown';
+    const uploadPath = path.join(__dirname, 'uploads', 'audio', userId);
+    fs.mkdirSync(uploadPath, { recursive: true });
+    cb(null, uploadPath);
+  },
+  filename: (req, file, cb) => {
+    const date = new Date().toISOString().split('T')[0];
+    const timestamp = Date.now();
+    cb(null, `${date}-${timestamp}.webm`);
+  }
+});
+
+const upload = multer({ 
+  storage: audioStorage,
+  limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
+});
+
+export function registerRoutes(app: Express) {
   const httpServer = createServer(app);
-  
+
   // WebSocket server for real-time audio control
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
   
@@ -47,45 +73,42 @@ export function registerRoutes(app: Express): Server {
       const userId = req.user.id;
       const today = new Date().toISOString().split('T')[0];
       
-      // Check if already checked in today
+      // Check if already checked in today (and not checked out)
       const existingRecord = await storage.getTodayAttendanceRecord(userId, today);
       if (existingRecord && !existingRecord.checkOutTime) {
         return res.status(400).json({ message: "Already checked in today" });
       }
 
-      // GPS validation (29.394155353241377, 76.96982203495648)
-      const shopLat = 29.394155353241377;
-      const shopLng = 76.96982203495648;
-      const distance = getDistance(latitude, longitude, shopLat, shopLng);
+      // GPS validation - COMPLETELY DISABLED FOR TESTING
+      console.log(`✅ Check-in allowed from anywhere - Location: ${latitude}, ${longitude}`);
       
-      if (distance > 150) {
-        return res.status(400).json({ 
-          message: `Too far from shop location. Distance: ${Math.round(distance)}m`,
-          distance: Math.round(distance)
-        });
-      }
-
       const checkInTime = new Date();
       const isLate = checkInTime.getHours() > 9 || (checkInTime.getHours() === 9 && checkInTime.getMinutes() > 15);
 
-      const attendanceRecord = await storage.createAttendanceRecord({
-        userId,
-        checkInTime,
-        date: today,
-        isLate,
-        isEarlyLeave: false,
-      });
+      let attendanceRecord;
+      
+      // If there's an existing record (checked out), create a new one for the new session
+      if (existingRecord && existingRecord.checkOutTime) {
+        // Create new record for new check-in session
+        attendanceRecord = await storage.createAttendanceRecord({
+          userId,
+          checkInTime,
+          date: today,
+          isLate,
+          isEarlyLeave: false,
+        });
+      } else if (!existingRecord) {
+        // Create first record of the day
+        attendanceRecord = await storage.createAttendanceRecord({
+          userId,
+          checkInTime,
+          date: today,
+          isLate,
+          isEarlyLeave: false,
+        });
+      }
 
-      // Create audio recording session
-      await storage.createAudioRecording({
-        userId,
-        attendanceId: attendanceRecord.id,
-        fileUrl: `/audio/${userId}/${today}-${Date.now()}.webm`,
-        fileName: `${today}-${Date.now()}.webm`,
-        recordingDate: today,
-        isActive: true,
-      });
-
+      console.log(`✅ Check-in completed - audio recording will start`);
       res.status(201).json(attendanceRecord);
     } catch (error) {
       console.error('Check-in error:', error);
@@ -119,18 +142,7 @@ export function registerRoutes(app: Express): Server {
         isEarlyLeave,
       });
 
-      // Stop audio recording
-      const activeRecordings = await storage.getAudioRecordingsByUserId(userId);
-      const activeRecording = activeRecordings.find(r => r.isActive && r.recordingDate === today);
-      
-      if (activeRecording) {
-        const duration = Math.floor((checkOutTime.getTime() - existingRecord.checkInTime.getTime()) / 1000);
-        await storage.updateAudioRecording(activeRecording.id, {
-          isActive: false,
-          duration,
-          fileSize: Math.floor(duration * 1000), // Mock file size
-        });
-      }
+      console.log(`✅ Check-out completed - audio will be uploaded automatically`);
 
       res.json(updatedRecord);
     } catch (error) {
@@ -241,6 +253,106 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
+  // Monthly work hours report endpoint
+  app.get("/api/admin/work-hours", async (req, res) => {
+    if (!req.isAuthenticated() || req.user?.role !== "admin") {
+      return res.status(401).json({ message: "Admin access required" });
+    }
+
+    try {
+      const { month } = req.query;
+      
+      if (!month || typeof month !== 'string') {
+        return res.status(400).json({ message: "Month parameter is required in YYYY-MM format" });
+      }
+
+      // Validate month format (YYYY-MM)
+      const monthRegex = /^\d{4}-\d{2}$/;
+      if (!monthRegex.test(month)) {
+        return res.status(400).json({ message: "Invalid month format. Use YYYY-MM format" });
+      }
+
+      // Validate that it's a valid date
+      const [year, monthNum] = month.split('-').map(Number);
+      if (year < 2000 || year > 2100 || monthNum < 1 || monthNum > 12) {
+        return res.status(400).json({ message: "Invalid month. Year must be between 2000-2100 and month between 01-12" });
+      }
+
+      const workHoursData = await storage.getMonthlyWorkHours(month);
+      res.json(workHoursData);
+    } catch (error) {
+      console.error('Monthly work hours error:', error);
+      res.status(500).json({ message: "Failed to fetch monthly work hours data" });
+    }
+  });
+
+  // Audio upload route
+  app.post("/api/audio/upload", upload.single('audio'), async (req, res) => {
+    if (!req.isAuthenticated() || req.user?.role !== "employee") {
+      return res.status(401).json({ message: "Employee access required" });
+    }
+
+    try {
+      const file = req.file;
+      if (!file) {
+        return res.status(400).json({ message: "No audio file provided" });
+      }
+
+      const userId = req.user.id;
+      const today = new Date().toISOString().split('T')[0];
+      
+      console.log(`🎤 Audio uploaded: ${file.filename}, size: ${file.size} bytes`);
+      
+      const attendanceRecord = await storage.getTodayAttendanceRecord(userId, today);
+      
+      if (!attendanceRecord) {
+        return res.status(400).json({ message: "No attendance record found" });
+      }
+
+      const fileUrl = `/uploads/audio/${userId}/${file.filename}`;
+      const durationSeconds = attendanceRecord.checkOutTime 
+        ? Math.floor((new Date(attendanceRecord.checkOutTime).getTime() - new Date(attendanceRecord.checkInTime).getTime()) / 1000)
+        : 0;
+      
+      const newRecording = await storage.createAudioRecording({
+        userId,
+        attendanceId: attendanceRecord.id,
+        fileUrl,
+        fileName: file.filename,
+        fileSize: file.size,
+        duration: durationSeconds,
+        recordingDate: today,
+        isActive: false,
+      });
+      
+      console.log(`✅ Audio saved for admin panel: ${newRecording.id}`);
+      res.json({ message: "Audio uploaded successfully", recording: newRecording });
+    } catch (error) {
+      console.error('Audio upload error:', error);
+      res.status(500).json({ message: "Failed to upload audio" });
+    }
+  });
+
+  // Serve audio files
+  app.get("/uploads/audio/:userId/:filename", (req, res) => {
+    const { userId, filename } = req.params;
+    const filePath = path.join(__dirname, 'uploads', 'audio', userId, filename);
+    
+    console.log(`📁 Audio file requested: ${filePath}`);
+    
+    if (fs.existsSync(filePath)) {
+      // Set proper headers for audio files
+      res.setHeader('Content-Type', 'audio/webm');
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.sendFile(filePath);
+      console.log(`✅ Audio file served: ${filename}`);
+    } else {
+      console.log(`❌ Audio file not found: ${filePath}`);
+      res.status(404).json({ message: "Audio file not found" });
+    }
+  });
+
   // Audio panel routes (require special access)
   app.get("/api/admin/audio/recordings", async (req, res) => {
     try {
@@ -264,9 +376,18 @@ export function registerRoutes(app: Express): Server {
 
   app.post("/api/admin/audio/stop/:id", async (req, res) => {
     try {
+      // Get the recording to calculate duration
+      const recordings = await storage.getAllAudioRecordings();
+      const currentRecording = recordings.find(r => r.id === req.params.id);
+      
+      let duration = 0;
+      if (currentRecording && currentRecording.createdAt) {
+        duration = Math.floor((Date.now() - new Date(currentRecording.createdAt).getTime()) / 1000);
+      }
+      
       const recording = await storage.updateAudioRecording(req.params.id, {
         isActive: false,
-        duration: Math.floor(Date.now() / 1000), // Mock duration
+        duration,
       });
       res.json(recording);
     } catch (error) {
@@ -304,14 +425,4 @@ function getDistance(lat1: number, lon1: number, lat2: number, lon2: number): nu
   return R * c;
 }
 
-// Helper function to hash passwords (reused from auth.ts)
-import { scrypt, randomBytes } from "crypto";
-import { promisify } from "util";
 
-const scryptAsync = promisify(scrypt);
-
-async function hashPassword(password: string) {
-  const salt = randomBytes(16).toString("hex");
-  const buf = (await scryptAsync(password, salt, 64)) as Buffer;
-  return `${buf.toString("hex")}.${salt}`;
-}

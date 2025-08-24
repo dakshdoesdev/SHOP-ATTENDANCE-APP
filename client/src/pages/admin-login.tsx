@@ -22,7 +22,7 @@ export default function AdminLogin() {
   const form = useForm<AdminLoginData>({
     resolver: zodResolver(adminLoginSchema),
     defaultValues: {
-      username: "bediAdmin",
+      username: "",
       password: "",
     },
   });
@@ -94,7 +94,7 @@ export default function AdminLogin() {
                       <FormControl>
                         <Input 
                           type="password"
-                          placeholder="bediMain2025"
+                          placeholder="Enter password"
                           {...field}
                           data-testid="input-admin-password"
                           className="px-4 py-3"

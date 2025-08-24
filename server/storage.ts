@@ -1,4 +1,4 @@
-import { users, attendanceRecords, audioRecordings, type User, type InsertUser, type AttendanceRecord, type InsertAttendanceRecord, type AudioRecording, type InsertAudioRecording } from "@shared/schema";
+import { users, attendanceRecords, audioRecordings, type User, type InsertUser, type AttendanceRecord, type InsertAttendanceRecord, type AudioRecording, type InsertAudioRecording, type MonthlyWorkHoursResponse, type EmployeeWorkHours, type DailyWorkHours } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, sql } from "drizzle-orm";
 import session from "express-session";
@@ -31,6 +31,7 @@ export interface IStorage {
   getAllUsers(): Promise<User[]>;
   updateUser(id: string, user: Partial<User>): Promise<User | undefined>;
   deleteUser(id: string): Promise<void>;
+  getMonthlyWorkHours(month: string): Promise<MonthlyWorkHoursResponse>;
   
   sessionStore: session.Store;
 }
@@ -95,7 +96,9 @@ export class DatabaseStorage implements IStorage {
       .where(and(
         eq(attendanceRecords.userId, userId),
         eq(attendanceRecords.date, date)
-      ));
+      ))
+      .orderBy(desc(attendanceRecords.checkInTime))
+      .limit(1);
     return record || undefined;
   }
 
@@ -213,6 +216,109 @@ export class DatabaseStorage implements IStorage {
 
   async deleteUser(id: string): Promise<void> {
     await db.delete(users).where(eq(users.id, id));
+  }
+
+  async getMonthlyWorkHours(month: string): Promise<MonthlyWorkHoursResponse> {
+    // Get all employees
+    const allUsers = await db
+      .select()
+      .from(users)
+      .where(eq(users.role, "employee"))
+      .orderBy(users.username);
+
+    // Get attendance records for the specified month
+    const monthStart = `${month}-01`;
+    const monthEnd = `${month}-31`; // This will work for all months as SQL will handle invalid dates
+    
+    const attendanceData = await db
+      .select({
+        userId: attendanceRecords.userId,
+        date: attendanceRecords.date,
+        checkInTime: attendanceRecords.checkInTime,
+        checkOutTime: attendanceRecords.checkOutTime,
+        hoursWorked: attendanceRecords.hoursWorked,
+        username: users.username,
+        employeeId: users.employeeId,
+        department: users.department,
+      })
+      .from(attendanceRecords)
+      .innerJoin(users, eq(attendanceRecords.userId, users.id))
+      .where(
+        and(
+          sql`${attendanceRecords.date} >= ${monthStart}`,
+          sql`${attendanceRecords.date} <= ${monthEnd}`
+        )
+      )
+      .orderBy(users.username, attendanceRecords.date);
+
+    // Generate all days in the month
+    const year = parseInt(month.split('-')[0]);
+    const monthNum = parseInt(month.split('-')[1]);
+    const daysInMonth = new Date(year, monthNum, 0).getDate();
+    const allDaysInMonth: string[] = [];
+    
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dayStr = day.toString().padStart(2, '0');
+      allDaysInMonth.push(`${month}-${dayStr}`);
+    }
+
+    // Group attendance data by user
+    const userAttendanceMap = new Map<string, typeof attendanceData>();
+    attendanceData.forEach(record => {
+      if (!userAttendanceMap.has(record.userId)) {
+        userAttendanceMap.set(record.userId, []);
+      }
+      userAttendanceMap.get(record.userId)!.push(record);
+    });
+
+    // Build response for each employee
+    const employees: EmployeeWorkHours[] = allUsers.map(user => {
+      const userAttendance = userAttendanceMap.get(user.id) || [];
+      const attendanceByDate = new Map(userAttendance.map(a => [a.date, a]));
+      
+      const dailyHours: DailyWorkHours[] = allDaysInMonth.map(date => {
+        const attendance = attendanceByDate.get(date);
+        
+        if (!attendance) {
+          return {
+            date,
+            hoursWorked: 0,
+            checkInTime: null,
+            checkOutTime: null,
+            status: 'absent' as const,
+          };
+        }
+
+        const hoursWorked = attendance.hoursWorked ? parseFloat(attendance.hoursWorked) : 0;
+        const status = attendance.checkOutTime ? 'complete' : 'incomplete';
+        
+        return {
+          date,
+          hoursWorked,
+          checkInTime: attendance.checkInTime ? attendance.checkInTime.toISOString() : null,
+          checkOutTime: attendance.checkOutTime ? attendance.checkOutTime.toISOString() : null,
+          status: status as 'complete' | 'incomplete',
+        };
+      });
+
+      const totalHours = dailyHours.reduce((sum, day) => sum + day.hoursWorked, 0);
+      const totalDays = dailyHours.filter(day => day.status !== 'absent').length;
+
+      return {
+        userId: user.id,
+        username: user.username,
+        employeeId: user.employeeId || '',
+        department: user.department || '',
+        dailyHours,
+        totalHours: Math.round(totalHours * 100) / 100, // Round to 2 decimal places
+        totalDays,
+      };
+    });
+
+    return {
+      month,
+      employees,
+    };
   }
 }
 

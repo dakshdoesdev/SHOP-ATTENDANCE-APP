@@ -82,9 +82,9 @@ export default function AuthPage() {
                           <FormItem>
                             <FormLabel>Password</FormLabel>
                             <FormControl>
-                              <Input 
-                                type="password" 
-                                placeholder="Enter password" 
+                              <Input
+                                type="password"
+                                placeholder="Enter password"
                                 {...field}
                                 data-testid="input-password"
                               />

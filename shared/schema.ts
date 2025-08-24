@@ -33,8 +33,8 @@ export const audioRecordings = pgTable("audio_recordings", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
   attendanceId: varchar("attendance_id").references(() => attendanceRecords.id),
-  fileUrl: text("file_url").notNull(),
-  fileName: text("file_name").notNull(),
+  fileUrl: text("file_url"),
+  fileName: text("file_name"),
   fileSize: integer("file_size"), // in bytes
   duration: integer("duration"), // in seconds
   recordingDate: text("recording_date").notNull(), // YYYY-MM-DD format
@@ -103,3 +103,27 @@ export type AudioRecording = typeof audioRecordings.$inferSelect;
 export type InsertAudioRecording = z.infer<typeof insertAudioRecordingSchema>;
 export type LoginData = z.infer<typeof loginSchema>;
 export type AdminLoginData = z.infer<typeof adminLoginSchema>;
+
+// Monthly work hours types
+export type DailyWorkHours = {
+  date: string; // YYYY-MM-DD
+  hoursWorked: number;
+  checkInTime: string | null;
+  checkOutTime: string | null;
+  status: 'complete' | 'incomplete' | 'absent';
+};
+
+export type EmployeeWorkHours = {
+  userId: string;
+  username: string;
+  employeeId: string;
+  department: string;
+  dailyHours: DailyWorkHours[];
+  totalHours: number;
+  totalDays: number;
+};
+
+export type MonthlyWorkHoursResponse = {
+  month: string; // YYYY-MM
+  employees: EmployeeWorkHours[];
+};

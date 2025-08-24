@@ -156,7 +156,23 @@ export default function AdminAudio() {
   };
 
   const handleDownload = (recording: AudioRecording & { user: User }) => {
-    // Mock download - in real implementation, this would download the actual file
+    if (!recording.fileUrl) {
+      toast({
+        title: "Download failed",
+        description: "Audio file not available",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    // Create download link
+    const link = document.createElement('a');
+    link.href = recording.fileUrl;
+    link.download = recording.fileName || 'audio-recording.webm';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
     toast({
       title: "Download started",
       description: `Downloading ${recording.fileName}`,
@@ -164,10 +180,68 @@ export default function AdminAudio() {
   };
 
   const handlePlay = (recording: AudioRecording & { user: User }) => {
-    // Mock play - in real implementation, this would play the audio
-    toast({
-      title: "Audio playback",
-      description: `Playing ${recording.fileName}`,
+    if (!recording.fileUrl) {
+      toast({
+        title: "Playback failed",
+        description: "Audio file not available",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    console.log('Attempting to play audio:', recording.fileUrl);
+    
+    // Create and play audio
+    const audio = new Audio(recording.fileUrl);
+    
+    audio.addEventListener('loadstart', () => {
+      console.log('Audio loading started');
+    });
+    
+    audio.addEventListener('canplay', () => {
+      console.log('Audio can start playing');
+      toast({
+        title: "Audio playback",
+        description: `Playing ${recording.fileName}`,
+      });
+    });
+    
+    audio.addEventListener('error', (e) => {
+      console.error('Audio error event:', e);
+      const error = audio.error;
+      let errorMessage = "Could not play audio file";
+      
+      if (error) {
+        switch (error.code) {
+          case error.MEDIA_ERR_ABORTED:
+            errorMessage = "Audio playback was aborted";
+            break;
+          case error.MEDIA_ERR_NETWORK:
+            errorMessage = "Network error while loading audio";
+            break;
+          case error.MEDIA_ERR_DECODE:
+            errorMessage = "Audio file is corrupted or unsupported";
+            break;
+          case error.MEDIA_ERR_SRC_NOT_SUPPORTED:
+            errorMessage = "Audio format not supported";
+            break;
+        }
+      }
+      
+      toast({
+        title: "Playback failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    });
+    
+    audio.play().catch(error => {
+      console.error('Audio play() error:', error);
+      toast({
+        title: "Playback failed",
+        description: `Play error: ${error.message}`,
+        variant: "destructive",
+      });
     });
   };
 

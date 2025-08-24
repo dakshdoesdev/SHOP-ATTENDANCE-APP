@@ -16,7 +16,26 @@ declare global {
 
 const scryptAsync = promisify(scrypt);
 
-async function hashPassword(password: string) {
+async function createTestEmployee() {
+  try {
+    const existingUser = await storage.getUserByUsername("test");
+    if (!existingUser) {
+      const hashedPassword = await hashPassword("test");
+      await storage.createUser({
+        username: "test",
+        password: hashedPassword,
+        role: "employee",
+        employeeId: "EMP001",
+        department: "Testing",
+      });
+      console.log('✅ Test employee created: username=test, password=test');
+    }
+  } catch (error) {
+    console.log('ℹ️ Test employee creation skipped (database not ready)');
+  }
+}
+
+export async function hashPassword(password: string) {
   const salt = randomBytes(16).toString("hex");
   const buf = (await scryptAsync(password, salt, 64)) as Buffer;
   return `${buf.toString("hex")}.${salt}`;
@@ -30,6 +49,9 @@ async function comparePasswords(supplied: string, stored: string) {
 }
 
 export function setupAuth(app: Express) {
+  // Create test employee on startup
+  createTestEmployee();
+
   const sessionSettings: session.SessionOptions = {
     secret: process.env.SESSION_SECRET || "bedi-enterprises-secret-key-2025",
     resave: false,
@@ -42,8 +64,10 @@ export function setupAuth(app: Express) {
     },
   };
 
+  const sessionMiddleware = session(sessionSettings);
+
   app.set("trust proxy", 1);
-  app.use(session(sessionSettings));
+  app.use(sessionMiddleware);
   app.use(passport.initialize());
   app.use(passport.session());
 
@@ -190,4 +214,5 @@ export function setupAuth(app: Express) {
 
     next();
   });
+  return sessionMiddleware;
 }

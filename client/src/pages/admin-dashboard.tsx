@@ -95,6 +95,12 @@ export default function AdminDashboard() {
                   Employees
                 </Button>
               </Link>
+              <Link href="/admin/work-hours">
+                <Button variant="ghost" data-testid="button-work-hours">
+                  <Clock className="mr-2 h-4 w-4" />
+                  Work Hours
+                </Button>
+              </Link>
               <Button
                 variant="ghost"
                 onClick={() => logoutMutation.mutate()}

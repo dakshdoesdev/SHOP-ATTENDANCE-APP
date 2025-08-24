@@ -5,6 +5,7 @@ import { createServer as createViteServer, createLogger } from "vite";
 import { type Server } from "http";
 import viteConfig from "../vite.config";
 import { nanoid } from "nanoid";
+import session from "express-session";
 
 const viteLogger = createLogger();
 
@@ -19,13 +20,11 @@ export function log(message: string, source = "express") {
   console.log(`${formattedTime} [${source}] ${message}`);
 }
 
-export async function setupVite(app: Express, server: Server) {
-  const serverOptions = {
-    middlewareMode: true,
-    hmr: { server },
-    allowedHosts: true as const,
-  };
-
+export async function setupVite(
+  app: Express,
+  server: Server,
+  sessionMiddleware: express.RequestHandler,
+) {
   const vite = await createViteServer({
     ...viteConfig,
     configFile: false,
@@ -36,12 +35,25 @@ export async function setupVite(app: Express, server: Server) {
         process.exit(1);
       },
     },
-    server: serverOptions,
+    server: {
+      middlewareMode: true,
+      hmr: { server },
+    },
     appType: "custom",
   });
 
+  app.use(sessionMiddleware);
   app.use(vite.middlewares);
   app.use("*", async (req, res, next) => {
+    // Skip Vite handling for API routes and uploads
+    if (req.originalUrl.startsWith("/api") || req.originalUrl.startsWith("/uploads")) {
+      return next();
+    }
+
+    if (!vite) {
+      return next();
+    }
+
     const url = req.originalUrl;
 
     try {
@@ -63,6 +75,7 @@ export async function setupVite(app: Express, server: Server) {
     } catch (e) {
       vite.ssrFixStacktrace(e as Error);
       next(e);
+      return;
     }
   });
 }

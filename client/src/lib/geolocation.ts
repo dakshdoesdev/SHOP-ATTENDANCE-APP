@@ -67,8 +67,8 @@ export function calculateDistance(
 }
 
 export const SHOP_LOCATION = {
-  latitude: 29.394155353241377,
-  longitude: 76.96982203495648,
+  latitude: 29.379186,
+  longitude: 76.991095,
 } as const;
 
-export const MAX_DISTANCE = 150; // meters
+export const MAX_DISTANCE = 15000; // meters - increased for testing

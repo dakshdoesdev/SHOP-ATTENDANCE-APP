@@ -262,6 +262,25 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  app.put("/api/admin/employees/:id", async (req, res) => {
+    if (!req.isAuthenticated() || req.user?.role !== "admin") {
+      return res.status(401).json({ message: "Admin access required" });
+    }
+
+    try {
+      const { username, employeeId, department, password } = req.body;
+      const updateData: any = { username, employeeId, department };
+      if (password) {
+        updateData.password = await hashPassword(password);
+      }
+      const user = await storage.updateUser(req.params.id, updateData);
+      res.json(user);
+    } catch (error) {
+      console.error('Update employee error:', error);
+      res.status(500).json({ message: "Failed to update employee" });
+    }
+  });
+
   app.delete("/api/admin/employees/:id", async (req, res) => {
     if (!req.isAuthenticated() || req.user?.role !== "admin") {
       return res.status(401).json({ message: "Admin access required" });

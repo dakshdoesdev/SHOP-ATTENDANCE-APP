@@ -6,11 +6,13 @@ interface AudioTimelineProps {
   fileUrl: string;
   startTime?: string | Date;
   duration?: number; // seconds
+  audioRef?: React.RefObject<HTMLAudioElement>;
 }
 
-export function AudioTimeline({ fileUrl, startTime, duration }: AudioTimelineProps) {
+export function AudioTimeline({ fileUrl, startTime, duration, audioRef }: AudioTimelineProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [segments, setSegments] = useState<number[]>([]);
+  const animationRef = useRef<number>();
 
   // Analyze the audio file once to generate simple amplitude segments
   useEffect(() => {
@@ -39,23 +41,44 @@ export function AudioTimeline({ fileUrl, startTime, duration }: AudioTimelinePro
     analyze();
   }, [fileUrl]);
 
-  // Draw the waveform bars
+  // Draw waveform and playback progress
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || segments.length === 0) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const width = canvas.width;
-    const height = canvas.height;
-    ctx.clearRect(0, 0, width, height);
-    segments.forEach((value, index) => {
-      const x = (index / segments.length) * width;
-      const barWidth = width / segments.length;
-      const barHeight = value * height;
-      ctx.fillStyle = value > 0.05 ? "#facc15" : "#e5e7eb"; // yellow when voice is detected
-      ctx.fillRect(x, height - barHeight, barWidth, barHeight);
-    });
-  }, [segments]);
+
+    const draw = () => {
+      const width = canvas.width;
+      const height = canvas.height;
+      ctx.clearRect(0, 0, width, height);
+
+      // Draw waveform bars
+      segments.forEach((value, index) => {
+        const x = (index / segments.length) * width;
+        const barWidth = width / segments.length;
+        const barHeight = value * height;
+        ctx.fillStyle = value > 0.02 ? "#facc15" : "#e5e7eb"; // yellow for voice
+        ctx.fillRect(x, height - barHeight, barWidth, barHeight);
+      });
+
+      // Draw progress indicator
+      const audio = audioRef?.current;
+      const total = audio?.duration || duration || 0;
+      if (audio && total > 0) {
+        const progress = audio.currentTime / total;
+        ctx.fillStyle = "rgba(0,0,0,0.5)";
+        ctx.fillRect(progress * width, 0, 2, height);
+      }
+
+      animationRef.current = requestAnimationFrame(draw);
+    };
+
+    draw();
+    return () => {
+      if (animationRef.current) cancelAnimationFrame(animationRef.current);
+    };
+  }, [segments, audioRef, duration]);
 
   const startLabel = startTime
     ? new Date(startTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })

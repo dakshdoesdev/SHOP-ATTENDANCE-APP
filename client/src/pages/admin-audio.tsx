@@ -437,6 +437,7 @@ export default function AdminAudio() {
                                     fileUrl={recording.fileUrl}
                                     startTime={recording.createdAt ?? undefined}
                                     duration={recording.duration || 0}
+                                    audioRef={audioRef}
                                   />
                                 )}
                               </div>

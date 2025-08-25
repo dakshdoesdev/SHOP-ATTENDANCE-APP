@@ -1,5 +1,5 @@
 import { useAuth } from "@/hooks/use-auth";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -7,12 +7,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { AudioRecording, User } from "@shared/schema";
-import { 
-  Mic, 
-  X, 
-  Play, 
-  Download, 
-  Trash2, 
+import {
+  Mic,
+  X,
+  Play,
+  Download,
+  Trash2,
   StopCircle,
   Loader2,
   AlertTriangle,
@@ -20,11 +20,14 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
+import AudioTimeline from "@/components/audio-timeline";
 
 export default function AdminAudio() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [ws, setWs] = useState<WebSocket | null>(null);
+  const [selectedRecording, setSelectedRecording] = useState<(AudioRecording & { user: User }) | null>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
 
   // Fetch active recordings
   const { data: activeRecordings, isLoading: activeLoading } = useQuery<(AudioRecording & { user: User })[]>({
@@ -81,6 +84,27 @@ export default function AdminAudio() {
     },
   });
 
+  const deleteRecordingMutation = useMutation({
+    mutationFn: async (recordingId: string) => {
+      const res = await apiRequest("DELETE", `/api/admin/audio/${recordingId}`);
+      return await res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/audio/recordings"] });
+      toast({
+        title: "Recording deleted",
+        description: "Audio recording has been removed",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Delete failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   // WebSocket connection for real-time audio control
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -121,6 +145,26 @@ export default function AdminAudio() {
       websocket.close();
     };
   }, []);
+
+  useEffect(() => {
+    if (selectedRecording && audioRef.current) {
+      audioRef.current.currentTime = 0;
+      audioRef.current.src = selectedRecording.fileUrl!;
+      audioRef.current.play().then(() => {
+        toast({
+          title: "Audio playback",
+          description: `Playing ${selectedRecording.fileName}`,
+        });
+      }).catch((error) => {
+        console.error('Audio play error:', error);
+        toast({
+          title: "Playback failed",
+          description: error.message,
+          variant: "destructive",
+        });
+      });
+    }
+  }, [selectedRecording]);
 
   const formatDuration = (seconds: number): string => {
     const hours = Math.floor(seconds / 3600);
@@ -188,70 +232,12 @@ export default function AdminAudio() {
       });
       return;
     }
-    
-    console.log('Attempting to play audio:', recording.fileUrl);
-    
-    // Create and play audio
-    const audio = new Audio(recording.fileUrl);
-    
-    audio.addEventListener('loadstart', () => {
-      console.log('Audio loading started');
-    });
-    
-    audio.addEventListener('canplay', () => {
-      console.log('Audio can start playing');
-      toast({
-        title: "Audio playback",
-        description: `Playing ${recording.fileName}`,
-      });
-    });
-    
-    audio.addEventListener('error', (e) => {
-      console.error('Audio error event:', e);
-      const error = audio.error;
-      let errorMessage = "Could not play audio file";
-      
-      if (error) {
-        switch (error.code) {
-          case error.MEDIA_ERR_ABORTED:
-            errorMessage = "Audio playback was aborted";
-            break;
-          case error.MEDIA_ERR_NETWORK:
-            errorMessage = "Network error while loading audio";
-            break;
-          case error.MEDIA_ERR_DECODE:
-            errorMessage = "Audio file is corrupted or unsupported";
-            break;
-          case error.MEDIA_ERR_SRC_NOT_SUPPORTED:
-            errorMessage = "Audio format not supported";
-            break;
-        }
-      }
-      
-      toast({
-        title: "Playback failed",
-        description: errorMessage,
-        variant: "destructive",
-      });
-    });
-    
-    audio.play().catch(error => {
-      console.error('Audio play() error:', error);
-      toast({
-        title: "Playback failed",
-        description: `Play error: ${error.message}`,
-        variant: "destructive",
-      });
-    });
+    setSelectedRecording(recording);
   };
 
   const handleDelete = (recordingId: string) => {
     if (confirm("Are you sure you want to delete this recording? This action cannot be undone.")) {
-      toast({
-        title: "Recording deleted",
-        description: "Audio recording has been removed",
-      });
-      // In real implementation, call delete API
+      deleteRecordingMutation.mutate(recordingId);
     }
   };
 
@@ -491,6 +477,21 @@ export default function AdminAudio() {
           </CardContent>
         </Card>
       </div>
+
+      {selectedRecording && (
+        <div className="fixed bottom-4 right-4 bg-white shadow-lg rounded-lg p-4 w-96">
+          <div className="flex justify-between items-center mb-2">
+            <span className="font-medium truncate">{selectedRecording.fileName}</span>
+            <Button variant="ghost" size="sm" onClick={() => setSelectedRecording(null)}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          <audio ref={audioRef} controls className="w-full mb-2" />
+          {selectedRecording.fileUrl && (
+            <AudioTimeline fileUrl={selectedRecording.fileUrl} />
+          )}
+        </div>
+      )}
     </div>
   );
 }

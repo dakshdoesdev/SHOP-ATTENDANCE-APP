@@ -219,6 +219,37 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  app.post("/api/admin/attendance/checkin", async (req, res) => {
+    if (!req.isAuthenticated() || req.user?.role !== "admin") {
+      return res.status(401).json({ message: "Admin access required" });
+    }
+
+    try {
+      const { userId } = req.body;
+      const today = new Date().toISOString().split('T')[0];
+      const existingRecord = await storage.getTodayAttendanceRecord(userId, today);
+      if (existingRecord && !existingRecord.checkOutTime) {
+        return res.status(400).json({ message: "Already checked in today" });
+      }
+
+      const checkInTime = new Date();
+      const isLate = checkInTime.getHours() > 9 || (checkInTime.getHours() === 9 && checkInTime.getMinutes() > 15);
+
+      const attendanceRecord = await storage.createAttendanceRecord({
+        userId,
+        checkInTime,
+        date: today,
+        isLate,
+        isEarlyLeave: false,
+      });
+
+      res.status(201).json(attendanceRecord);
+    } catch (error) {
+      console.error('Admin manual check-in error:', error);
+      res.status(500).json({ message: "Failed to check in employee" });
+    }
+  });
+
   app.get("/api/admin/employees", async (req, res) => {
     if (!req.isAuthenticated() || req.user?.role !== "admin") {
       return res.status(401).json({ message: "Admin access required" });

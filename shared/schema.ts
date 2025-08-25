@@ -13,6 +13,7 @@ export const users = pgTable("users", {
   department: text("department"),
   joinDate: timestamp("join_date").defaultNow(),
   isActive: boolean("is_active").default(true),
+  isLoggedIn: boolean("is_logged_in").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -71,6 +72,7 @@ export const audioRecordingsRelations = relations(audioRecordings, ({ one }) => 
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
   createdAt: true,
+  isLoggedIn: true,
 });
 
 export const insertAttendanceSchema = createInsertSchema(attendanceRecords).omit({

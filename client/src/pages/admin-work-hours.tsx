@@ -24,8 +24,10 @@ import {
 export default function AdminWorkHours() {
   const { user } = useAuth();
   
-  // Get current month as default (YYYY-MM format)
-  const currentMonth = new Date().toISOString().slice(0, 7);
+  // Default to previous month (YYYY-MM format)
+  const now = new Date();
+  const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const currentMonth = lastMonth.toISOString().slice(0, 7);
   const [selectedMonth, setSelectedMonth] = useState(currentMonth);
 
   const { data: workHoursData, isLoading, error } = useQuery<MonthlyWorkHoursResponse>({

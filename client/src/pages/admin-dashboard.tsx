@@ -44,6 +44,20 @@ export default function AdminDashboard() {
     queryKey: ["/api/admin/employees"],
   });
 
+  const manualCheckIn = useMutation({
+    mutationFn: async (userId: string) => {
+      const res = await apiRequest("POST", "/api/admin/attendance/checkin", { userId });
+      return await res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/attendance/today"] });
+      toast({ title: "Check-in recorded" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Check-in failed", description: err.message, variant: "destructive" });
+    },
+  });
+
   const audioForm = useForm<z.infer<typeof audioPasswordSchema>>({
     resolver: zodResolver(audioPasswordSchema),
     defaultValues: {
@@ -78,6 +92,9 @@ export default function AdminDashboard() {
   };
 
   const stats = getStats();
+  const absentEmployees = employees?.filter(
+    (e) => !todayAttendance?.some((r) => r.user.id === e.id)
+  ) ?? [];
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -195,6 +212,7 @@ export default function AdminDashboard() {
                       <TableHead>Check-out</TableHead>
                       <TableHead>Hours</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead>Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -218,18 +236,44 @@ export default function AdminDashboard() {
                           {record.hoursWorked || "0"}h
                         </TableCell>
                         <TableCell>
-                          <Badge 
+                          <Badge
                             variant={record.isLate ? "destructive" : "default"}
                             className={record.isLate ? "" : "bg-success text-white"}
                           >
                             {record.isLate ? "Late" : record.checkOutTime ? "Complete" : "On Time"}
                           </Badge>
                         </TableCell>
+                        <TableCell></TableCell>
                       </TableRow>
                     ))}
-                    {!todayAttendance || todayAttendance.length === 0 ? (
+                    {absentEmployees.map((emp) => (
+                      <TableRow key={emp.id} data-testid={`row-absent-${emp.id}`}>
+                        <TableCell>
+                          <div>
+                            <div className="font-medium text-gray-900">{emp.username}</div>
+                            <div className="text-sm text-gray-500">{emp.employeeId}</div>
+                          </div>
+                        </TableCell>
+                        <TableCell>-</TableCell>
+                        <TableCell>-</TableCell>
+                        <TableCell>0h</TableCell>
+                        <TableCell>
+                          <Badge variant="destructive">Absent</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            size="sm"
+                            onClick={() => manualCheckIn.mutate(emp.id)}
+                            disabled={manualCheckIn.isPending}
+                          >
+                            Mark Present
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {(!todayAttendance || todayAttendance.length === 0) && absentEmployees.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center text-gray-500 py-8">
+                        <TableCell colSpan={6} className="text-center text-gray-500 py-8">
                           No attendance records for today
                         </TableCell>
                       </TableRow>

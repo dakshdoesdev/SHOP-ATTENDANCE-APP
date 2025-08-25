@@ -123,17 +123,26 @@ export function setupAuth(app: Express) {
       if (!user) {
         return res.status(401).json({ message: info?.message || "Invalid credentials" });
       }
-      
+
+      if (user.isLoggedIn) {
+        return res.status(403).json({ message: "User already logged in elsewhere" });
+      }
+
       req.login(user, (err) => {
         if (err) return next(err);
-        res.status(200).json(user);
+        storage.updateUser(user.id, { isLoggedIn: true }).catch(console.error);
+        res.status(200).json({ ...user, isLoggedIn: true });
       });
     })(req, res, next);
   });
 
   app.post("/api/logout", (req, res, next) => {
+    const userId = req.user?.id;
     req.logout((err) => {
       if (err) return next(err);
+      if (userId) {
+        storage.updateUser(userId, { isLoggedIn: false }).catch(console.error);
+      }
       res.sendStatus(200);
     });
   });

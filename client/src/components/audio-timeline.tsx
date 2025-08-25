@@ -41,7 +41,21 @@ export function AudioTimeline({ fileUrl, startTime, duration, audioRef }: AudioT
     analyze();
   }, [fileUrl]);
 
-  // Draw waveform and playback progress
+  // Format seconds into H:MM
+  const formatTime = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    return h > 0 ? `${h}:${m.toString().padStart(2, "0")}` : `${m}m`;
+  };
+
+  // Determine interval for timeline markers
+  const getInterval = (total: number) => {
+    if (total > 3600) return 3600; // 1 hour
+    if (total > 600) return 600; // 10 minutes
+    return 60; // 1 minute
+  };
+
+  // Draw waveform, timeline, and playback progress
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || segments.length === 0) return;
@@ -51,24 +65,46 @@ export function AudioTimeline({ fileUrl, startTime, duration, audioRef }: AudioT
     const draw = () => {
       const width = canvas.width;
       const height = canvas.height;
+      const timelineHeight = 12;
+      const waveformHeight = height - timelineHeight;
       ctx.clearRect(0, 0, width, height);
 
       // Draw waveform bars
       segments.forEach((value, index) => {
         const x = (index / segments.length) * width;
         const barWidth = width / segments.length;
-        const barHeight = value * height;
+        const barHeight = value * waveformHeight;
         ctx.fillStyle = value > 0.02 ? "#facc15" : "#e5e7eb"; // yellow for voice
-        ctx.fillRect(x, height - barHeight, barWidth, barHeight);
+        ctx.fillRect(x, waveformHeight - barHeight, barWidth, barHeight);
       });
+
+      const total = duration || audioRef?.current?.duration || 0;
+
+      // Draw timeline markers
+      if (total > 0) {
+        const interval = getInterval(total);
+        for (let t = interval; t < total; t += interval) {
+          const x = (t / total) * width;
+          ctx.strokeStyle = "#94a3b8";
+          ctx.beginPath();
+          ctx.moveTo(x, waveformHeight);
+          ctx.lineTo(x, waveformHeight + 4);
+          ctx.stroke();
+
+          const label = formatTime(t);
+          ctx.fillStyle = "#475569";
+          ctx.font = "10px sans-serif";
+          const textWidth = ctx.measureText(label).width;
+          ctx.fillText(label, x - textWidth / 2, height - 2);
+        }
+      }
 
       // Draw progress indicator
       const audio = audioRef?.current;
-      const total = audio?.duration || duration || 0;
       if (audio && total > 0) {
         const progress = audio.currentTime / total;
         ctx.fillStyle = "rgba(0,0,0,0.5)";
-        ctx.fillRect(progress * width, 0, 2, height);
+        ctx.fillRect(progress * width, 0, 2, waveformHeight);
       }
 
       animationRef.current = requestAnimationFrame(draw);
@@ -95,7 +131,7 @@ export function AudioTimeline({ fileUrl, startTime, duration, audioRef }: AudioT
   return (
     <div className="flex items-center gap-2 mt-2">
       <span className="text-xs text-gray-600 w-14 text-left">{startLabel}</span>
-      <canvas ref={canvasRef} width={400} height={40} className="h-10 flex-1" />
+      <canvas ref={canvasRef} width={400} height={50} className="h-12 flex-1" />
       <span className="text-xs text-gray-600 w-14 text-right">{endLabel}</span>
     </div>
   );

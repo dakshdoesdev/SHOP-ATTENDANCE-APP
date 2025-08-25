@@ -3,7 +3,6 @@ import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { hashPassword } from "./auth";
 import { storage } from "./storage";
-import type { AttendanceRecord } from "@shared/schema";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -74,10 +73,10 @@ export function registerRoutes(app: Express) {
       const userId = req.user.id;
       const today = new Date().toISOString().split('T')[0];
       
-      // Check if already checked in today (and not checked out)
+      // Check if already checked in today
       const existingRecord = await storage.getTodayAttendanceRecord(userId, today);
-      if (existingRecord && !existingRecord.checkOutTime) {
-        return res.status(400).json({ message: "Already checked in today" });
+      if (existingRecord) {
+        return res.status(400).json({ message: "Attendance already recorded for today" });
       }
 
       // GPS validation - COMPLETELY DISABLED FOR TESTING
@@ -86,32 +85,13 @@ export function registerRoutes(app: Express) {
       const checkInTime = new Date();
       const isLate = checkInTime.getHours() > 9 || (checkInTime.getHours() === 9 && checkInTime.getMinutes() > 15);
 
-      let attendanceRecord: AttendanceRecord | undefined;
-      
-      // If there's an existing record (checked out), create a new one for the new session
-      if (existingRecord && existingRecord.checkOutTime) {
-        // Create new record for new check-in session
-        attendanceRecord = await storage.createAttendanceRecord({
-          userId,
-          checkInTime,
-          date: today,
-          isLate,
-          isEarlyLeave: false,
-        });
-      } else if (!existingRecord) {
-        // Create first record of the day
-        attendanceRecord = await storage.createAttendanceRecord({
-          userId,
-          checkInTime,
-          date: today,
-          isLate,
-          isEarlyLeave: false,
-        });
-      }
-
-      if (!attendanceRecord) {
-        throw new Error("Failed to create attendance record");
-      }
+      const attendanceRecord = await storage.createAttendanceRecord({
+        userId,
+        checkInTime,
+        date: today,
+        isLate,
+        isEarlyLeave: false,
+      });
 
       // Ensure only one audio record per user per day
       const existingAudio = await storage.getAudioRecordingByUserAndDate(userId, today);
@@ -228,8 +208,8 @@ export function registerRoutes(app: Express) {
       const { userId } = req.body;
       const today = new Date().toISOString().split('T')[0];
       const existingRecord = await storage.getTodayAttendanceRecord(userId, today);
-      if (existingRecord && !existingRecord.checkOutTime) {
-        return res.status(400).json({ message: "Already checked in today" });
+      if (existingRecord) {
+        return res.status(400).json({ message: "Attendance already recorded for today" });
       }
 
       const checkInTime = new Date();
@@ -247,6 +227,24 @@ export function registerRoutes(app: Express) {
     } catch (error) {
       console.error('Admin manual check-in error:', error);
       res.status(500).json({ message: "Failed to check in employee" });
+    }
+  });
+
+  app.put("/api/admin/attendance/:id", async (req, res) => {
+    if (!req.isAuthenticated() || req.user?.role !== "admin") {
+      return res.status(401).json({ message: "Admin access required" });
+    }
+
+    try {
+      const { isLate } = req.body;
+      const updated = await storage.updateAttendanceRecord(req.params.id, { isLate });
+      if (!updated) {
+        return res.status(404).json({ message: "Attendance record not found" });
+      }
+      res.json(updated);
+    } catch (error) {
+      console.error('Update attendance error:', error);
+      res.status(500).json({ message: "Failed to update attendance" });
     }
   });
 

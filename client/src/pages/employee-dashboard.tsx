@@ -182,9 +182,15 @@ export default function EmployeeDashboard() {
       });
     }
   };
+  const handleCheckOut = () => {
+    if (confirm("Are you sure you want to check out?")) {
+      checkOutMutation.mutate();
+    }
+  };
 
+  const hasAttendance = !!todayAttendance;
   const isCheckedIn = todayAttendance && !todayAttendance.checkOutTime;
-  const canCheckIn = !isCheckedIn; // Allow check-in from anywhere for testing
+  const canCheckIn = !hasAttendance;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -265,7 +271,7 @@ export default function EmployeeDashboard() {
                   : "bg-gray-400 cursor-not-allowed"
               }`}
               disabled={(!canCheckIn && !isCheckedIn) || checkInMutation.isPending || checkOutMutation.isPending}
-              onClick={isCheckedIn ? () => checkOutMutation.mutate() : handleCheckIn}
+              onClick={isCheckedIn ? handleCheckOut : handleCheckIn}
               data-testid={isCheckedIn ? "button-checkout" : "button-checkin"}
             >
               {(checkInMutation.isPending || checkOutMutation.isPending) && (
@@ -276,7 +282,11 @@ export default function EmployeeDashboard() {
               )}
             </Button>
             <p className="text-xs text-gray-500">
-              {isCheckedIn ? "Tap to stop work" : "Tap to start work"}
+              {isCheckedIn
+                ? "Tap to stop work"
+                : hasAttendance
+                ? "Today's attendance recorded"
+                : "Tap to start work"}
             </p>
           </CardContent>
         </Card>

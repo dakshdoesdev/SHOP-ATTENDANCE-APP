@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -57,6 +58,24 @@ export default function AdminDashboard() {
       toast({ title: "Check-in failed", description: err.message, variant: "destructive" });
     },
   });
+
+  const updateAttendance = useMutation({
+    mutationFn: async ({ id, isLate }: { id: string; isLate: boolean }) => {
+      const res = await apiRequest("PUT", `/api/admin/attendance/${id}`, { isLate });
+      return await res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/attendance/today"] });
+      toast({ title: "Status updated" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Update failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const handleStatusChange = (id: string, value: string) => {
+    updateAttendance.mutate({ id, isLate: value === "late" });
+  };
 
   const audioForm = useForm<z.infer<typeof audioPasswordSchema>>({
     resolver: zodResolver(audioPasswordSchema),
@@ -236,12 +255,18 @@ export default function AdminDashboard() {
                           {record.hoursWorked || "0"}h
                         </TableCell>
                         <TableCell>
-                          <Badge
-                            variant={record.isLate ? "destructive" : "default"}
-                            className={record.isLate ? "" : "bg-success text-white"}
+                          <Select
+                            value={record.isLate ? "late" : "present"}
+                            onValueChange={(value) => handleStatusChange(record.id, value)}
                           >
-                            {record.isLate ? "Late" : record.checkOutTime ? "Complete" : "On Time"}
-                          </Badge>
+                            <SelectTrigger className="w-[110px]">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="present">Present</SelectItem>
+                              <SelectItem value="late">Late</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </TableCell>
                         <TableCell></TableCell>
                       </TableRow>

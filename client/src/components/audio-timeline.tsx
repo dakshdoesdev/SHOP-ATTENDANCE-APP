@@ -13,6 +13,7 @@ export function AudioTimeline({ fileUrl, startTime, duration, audioRef }: AudioT
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [segments, setSegments] = useState<number[]>([]);
   const animationRef = useRef<number>();
+  const [totalDuration, setTotalDuration] = useState<number>(duration && duration > 0 ? duration : 0);
 
   // Analyze the audio file once to generate simple amplitude segments
   useEffect(() => {
@@ -40,6 +41,28 @@ export function AudioTimeline({ fileUrl, startTime, duration, audioRef }: AudioT
     };
     analyze();
   }, [fileUrl]);
+
+  // Keep track of the total duration using prop or audio metadata
+  useEffect(() => {
+    if (duration && duration > 0) {
+      setTotalDuration(duration);
+    }
+  }, [duration]);
+
+  useEffect(() => {
+    if (!audioRef?.current) return;
+    const audio = audioRef.current;
+    const update = () => {
+      if (audio.duration && (!duration || duration === 0)) {
+        setTotalDuration(audio.duration);
+      }
+    };
+    audio.addEventListener("loadedmetadata", update);
+    update();
+    return () => {
+      audio.removeEventListener("loadedmetadata", update);
+    };
+  }, [audioRef, duration]);
 
   // Format seconds into H:MM
   const formatTime = (seconds: number) => {
@@ -78,7 +101,7 @@ export function AudioTimeline({ fileUrl, startTime, duration, audioRef }: AudioT
         ctx.fillRect(x, waveformHeight - barHeight, barWidth, barHeight);
       });
 
-      const total = duration || audioRef?.current?.duration || 0;
+      const total = totalDuration;
 
       // Draw timeline markers
       if (total > 0) {
@@ -114,18 +137,18 @@ export function AudioTimeline({ fileUrl, startTime, duration, audioRef }: AudioT
     return () => {
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
     };
-  }, [segments, audioRef, duration]);
+  }, [segments, audioRef, totalDuration]);
 
   const startLabel = startTime
     ? new Date(startTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     : "0:00";
 
   const endLabel = (() => {
-    if (startTime && typeof duration === "number") {
-      const end = new Date(new Date(startTime).getTime() + duration * 1000);
+    if (startTime && totalDuration > 0) {
+      const end = new Date(new Date(startTime).getTime() + totalDuration * 1000);
       return end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     }
-    return duration ? `${duration}s` : "";
+    return totalDuration > 0 ? formatTime(totalDuration) : "";
   })();
 
   return (

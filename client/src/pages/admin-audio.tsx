@@ -436,7 +436,7 @@ export default function AdminAudio() {
                                   <AudioTimeline
                                     fileUrl={recording.fileUrl}
                                     startTime={recording.createdAt ?? undefined}
-                                    duration={recording.duration || 0}
+                                    duration={recording.duration ?? undefined}
                                     audioRef={audioRef}
                                   />
                                 )}

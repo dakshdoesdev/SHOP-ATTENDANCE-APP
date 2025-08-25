@@ -1,5 +1,5 @@
 import { useAuth } from "@/hooks/use-auth";
-import { useEffect, useRef, useState, Fragment } from "react";
+import { useEffect, useRef, useState, Fragment, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +21,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
 import AudioTimeline from "@/components/audio-timeline";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export default function AdminAudio() {
   const { user } = useAuth();
@@ -40,6 +41,25 @@ export default function AdminAudio() {
     queryKey: ["/api/admin/audio/recordings"],
     refetchInterval: 30000, // Refresh every 30 seconds
   });
+
+  const [userFilter, setUserFilter] = useState<string>("all");
+
+  const uniqueUsers = useMemo(() => {
+    const map = new Map<string, User>();
+    allRecordings?.forEach(r => map.set(r.userId, r.user));
+    return Array.from(map.values());
+  }, [allRecordings]);
+
+  const filteredRecordings = useMemo(() => {
+    if (!allRecordings) return [] as (AudioRecording & { user: User })[];
+    const records = [...allRecordings];
+    records.sort((a, b) => {
+      const nameCompare = a.user.username.localeCompare(b.user.username);
+      if (nameCompare !== 0) return nameCompare;
+      return a.recordingDate.localeCompare(b.recordingDate);
+    });
+    return userFilter === "all" ? records : records.filter(r => r.userId === userFilter);
+  }, [allRecordings, userFilter]);
 
   const stopRecordingMutation = useMutation({
     mutationFn: async (recordingId: string) => {
@@ -177,8 +197,10 @@ export default function AdminAudio() {
     return `${mb.toFixed(1)} MB`;
   };
 
-  const formatDate = (dateString: string): string => {
-    return new Date(dateString).toLocaleDateString();
+  const formatDate = (dateString: string | null | undefined): string => {
+    if (!dateString) return "Unknown";
+    const date = new Date(dateString);
+    return isNaN(date.getTime()) ? "Unknown" : date.toLocaleDateString();
   };
 
   const calculateTotalStorage = (): { totalSize: number, totalFiles: number } => {
@@ -355,6 +377,21 @@ export default function AdminAudio() {
               </div>
             ) : (
               <div className="overflow-x-auto">
+                {uniqueUsers.length > 1 && (
+                  <div className="mb-4">
+                    <Select value={userFilter} onValueChange={setUserFilter}>
+                      <SelectTrigger className="w-56">
+                        <SelectValue placeholder="Filter by employee" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Employees</SelectItem>
+                        {uniqueUsers.map(u => (
+                          <SelectItem key={u.id} value={u.id}>{u.username}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -366,7 +403,7 @@ export default function AdminAudio() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {allRecordings?.map((recording) => (
+                    {filteredRecordings.map((recording) => (
                       <Fragment key={recording.id}>
                         <TableRow data-testid={`row-recording-${recording.id}`}>
                           <TableCell>
@@ -446,7 +483,7 @@ export default function AdminAudio() {
                         )}
                       </Fragment>
                     ))}
-                    {!allRecordings || allRecordings.length === 0 ? (
+                    {filteredRecordings.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={5} className="text-center text-gray-500 py-8">
                           No audio recordings found

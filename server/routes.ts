@@ -113,15 +113,18 @@ export function registerRoutes(app: Express) {
         throw new Error("Failed to create attendance record");
       }
 
-      // Create placeholder audio recording entry for real-time monitoring
-      const audioRecording = await storage.createAudioRecording({
-        userId,
-        attendanceId: attendanceRecord.id,
-        recordingDate: today,
-        isActive: true,
-      });
+      // Ensure only one audio record per user per day
+      const existingAudio = await storage.getAudioRecordingByUserAndDate(userId, today);
+      const audioRecording = existingAudio
+        ? await storage.updateAudioRecording(existingAudio.id, { isActive: true })
+        : await storage.createAudioRecording({
+            userId,
+            attendanceId: attendanceRecord.id,
+            recordingDate: today,
+            isActive: true,
+          });
 
-      // Notify connected dashboards about new recording
+      // Notify connected dashboards about new recording session
       wss.clients.forEach((client) => {
         if (client.readyState === WebSocket.OPEN) {
           client.send(JSON.stringify({ type: "audio_start", recording: audioRecording }));
@@ -331,31 +334,36 @@ export function registerRoutes(app: Express) {
 
       const fileUrl = `/uploads/audio/${userId}/${file.filename}`;
 
-      // Find the active recording entry created at check-in
-      const activeRecording = await storage.getActiveAudioRecordingByAttendance(attendanceRecord.id);
+      // Ensure single recording per user per day
+      let recording = await storage.getAudioRecordingByUserAndDate(userId, today);
 
-      const durationSeconds = activeRecording
-        ? Math.floor((Date.now() - new Date(activeRecording.createdAt!).getTime()) / 1000)
-        : 0;
+      const clientDuration = req.body.duration ? parseInt(req.body.duration, 10) : undefined;
+      const durationSeconds = clientDuration !== undefined
+        ? clientDuration
+        : recording && recording.createdAt
+          ? Math.floor((Date.now() - new Date(recording.createdAt).getTime()) / 1000)
+          : 0;
 
       let savedRecording;
-      if (activeRecording) {
-        savedRecording = await storage.updateAudioRecording(activeRecording.id, {
+      if (recording) {
+        savedRecording = await storage.updateAudioRecording(recording.id, {
           fileUrl,
           fileName: file.filename,
           fileSize: file.size,
           duration: durationSeconds,
+          recordingDate: today,
           isActive: false,
         });
 
         // Notify dashboards that recording has stopped
-        wss.clients.forEach((client) => {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify({ type: "audio_stop", recordingId: activeRecording.id }));
-          }
-        });
+        if (recording.isActive) {
+          wss.clients.forEach((client) => {
+            if (client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify({ type: "audio_stop", recordingId: recording.id }));
+            }
+          });
+        }
       } else {
-        // Fallback - create a new record if none was active
         savedRecording = await storage.createAudioRecording({
           userId,
           attendanceId: attendanceRecord.id,
@@ -367,6 +375,8 @@ export function registerRoutes(app: Express) {
           isActive: false,
         });
       }
+
+      await storage.enforceAudioStorageLimit(30 * 1024 * 1024 * 1024);
 
       console.log(`✅ Audio saved for admin panel: ${savedRecording?.id}`);
       res.json({ message: "Audio uploaded successfully", recording: savedRecording });
@@ -419,18 +429,18 @@ export function registerRoutes(app: Express) {
 
   app.post("/api/admin/audio/stop/:id", async (req, res) => {
     try {
-      // Get the recording to calculate duration
-      const recordings = await storage.getAllAudioRecordings();
-      const currentRecording = recordings.find(r => r.id === req.params.id);
-      
+      const currentRecording = await storage.getAudioRecordingById(req.params.id);
+
       let duration = 0;
-      if (currentRecording && currentRecording.createdAt) {
+      if (currentRecording?.createdAt) {
         duration = Math.floor((Date.now() - new Date(currentRecording.createdAt).getTime()) / 1000);
       }
-      
+
+      const today = new Date().toISOString().split('T')[0];
       const recording = await storage.updateAudioRecording(req.params.id, {
         isActive: false,
         duration,
+        recordingDate: currentRecording?.recordingDate || today,
       });
 
       // Broadcast stop event so dashboards refresh

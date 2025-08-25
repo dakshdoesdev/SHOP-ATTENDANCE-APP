@@ -4,6 +4,8 @@ import { eq, desc, and, sql } from "drizzle-orm";
 import session from "express-session";
 import connectPg from "connect-pg-simple";
 import { pool } from "./db";
+import fs from "fs";
+import path from "path";
 
 const PostgresSessionStore = connectPg(session);
 
@@ -24,6 +26,10 @@ export interface IStorage {
   updateAudioRecording(id: string, recording: Partial<AudioRecording>): Promise<AudioRecording | undefined>;
   getAudioRecordingById(id: string): Promise<AudioRecording | undefined>;
   getActiveAudioRecordingByAttendance(attendanceId: string): Promise<AudioRecording | undefined>;
+  getAudioRecordingByUserAndDate(userId: string, date: string): Promise<AudioRecording | undefined>;
+  getTotalAudioStorage(): Promise<number>;
+  getOldestAudioRecording(): Promise<AudioRecording | undefined>;
+  enforceAudioStorageLimit(maxBytes: number): Promise<void>;
   getAudioRecordingsByUserId(userId: string): Promise<AudioRecording[]>;
   getAllAudioRecordings(): Promise<(AudioRecording & { user: User })[]>;
   getActiveAudioRecordings(): Promise<(AudioRecording & { user: User })[]>;
@@ -157,6 +163,57 @@ export class DatabaseStorage implements IStorage {
       .from(audioRecordings)
       .where(and(eq(audioRecordings.attendanceId, attendanceId), eq(audioRecordings.isActive, true)));
     return recording || undefined;
+  }
+
+  async getAudioRecordingByUserAndDate(userId: string, date: string): Promise<AudioRecording | undefined> {
+    const [recording] = await db
+      .select()
+      .from(audioRecordings)
+      .where(and(eq(audioRecordings.userId, userId), eq(audioRecordings.recordingDate, date)))
+      .orderBy(desc(audioRecordings.createdAt));
+    return recording || undefined;
+  }
+
+  async getTotalAudioStorage(): Promise<number> {
+    const [result] = await db
+      .select({ total: sql<number>`coalesce(sum(${audioRecordings.fileSize}), 0)` })
+      .from(audioRecordings);
+    return result?.total || 0;
+  }
+
+  async getOldestAudioRecording(): Promise<AudioRecording | undefined> {
+    const [recording] = await db
+      .select()
+      .from(audioRecordings)
+      .orderBy(audioRecordings.createdAt)
+      .limit(1);
+    return recording || undefined;
+  }
+
+  async enforceAudioStorageLimit(maxBytes: number): Promise<void> {
+    let total = await this.getTotalAudioStorage();
+    while (total > maxBytes) {
+      const oldest = await this.getOldestAudioRecording();
+      if (!oldest) break;
+
+      if (oldest.fileName) {
+        const filePath = path.join(
+          __dirname,
+          'uploads',
+          'audio',
+          oldest.userId,
+          oldest.fileName
+        );
+        try {
+          await fs.promises.unlink(filePath);
+        } catch (err) {
+          console.warn('File delete error:', err);
+        }
+      }
+
+      await this.deleteAudioRecording(oldest.id);
+      total -= oldest.fileSize || 0;
+    }
   }
 
   async getAudioRecordingsByUserId(userId: string): Promise<AudioRecording[]> {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-// Renders a simple waveform visualization for an audio file
+// Renders a waveform timeline with optional start/end time labels
 
 interface AudioTimelineProps {
   fileUrl: string;
@@ -12,6 +12,7 @@ export function AudioTimeline({ fileUrl, startTime, duration }: AudioTimelinePro
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [segments, setSegments] = useState<number[]>([]);
 
+  // Analyze the audio file once to generate simple amplitude segments
   useEffect(() => {
     const analyze = async () => {
       try {
@@ -38,6 +39,7 @@ export function AudioTimeline({ fileUrl, startTime, duration }: AudioTimelinePro
     analyze();
   }, [fileUrl]);
 
+  // Draw the waveform bars
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || segments.length === 0) return;
@@ -49,31 +51,31 @@ export function AudioTimeline({ fileUrl, startTime, duration }: AudioTimelinePro
     segments.forEach((value, index) => {
       const x = (index / segments.length) * width;
       const barWidth = width / segments.length;
-      const barHeight = value * (height - 20); // leave space for labels
-      ctx.fillStyle = value > 0.05 ? "#facc15" : "#e5e7eb"; // yellow for voice
-      ctx.fillRect(x, (height - 20) - barHeight, barWidth, barHeight);
+      const barHeight = value * height;
+      ctx.fillStyle = value > 0.05 ? "#facc15" : "#e5e7eb"; // yellow when voice is detected
+      ctx.fillRect(x, height - barHeight, barWidth, barHeight);
     });
+  }, [segments]);
 
-    const startLabel = startTime
-      ? new Date(startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      : '0:00';
-    const endLabel = (() => {
-      if (startTime && typeof duration === 'number') {
-        const end = new Date(new Date(startTime).getTime() + duration * 1000);
-        return end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      }
-      return duration ? `${duration}s` : '';
-    })();
+  const startLabel = startTime
+    ? new Date(startTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : "0:00";
 
-    ctx.fillStyle = '#4b5563';
-    ctx.font = '12px sans-serif';
-    ctx.textBaseline = 'bottom';
-    ctx.fillText(startLabel, 0, height);
-    const endWidth = ctx.measureText(endLabel).width;
-    ctx.fillText(endLabel, width - endWidth, height);
-  }, [segments, startTime, duration]);
+  const endLabel = (() => {
+    if (startTime && typeof duration === "number") {
+      const end = new Date(new Date(startTime).getTime() + duration * 1000);
+      return end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+    return duration ? `${duration}s` : "";
+  })();
 
-  return <canvas ref={canvasRef} width={600} height={80} className="w-full h-20" />;
+  return (
+    <div className="flex items-center gap-2 mt-2">
+      <span className="text-xs text-gray-600 w-14 text-left">{startLabel}</span>
+      <canvas ref={canvasRef} width={400} height={40} className="h-10 flex-1" />
+      <span className="text-xs text-gray-600 w-14 text-right">{endLabel}</span>
+    </div>
+  );
 }
 
 export default AudioTimeline;

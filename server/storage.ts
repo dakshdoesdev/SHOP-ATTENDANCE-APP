@@ -23,6 +23,7 @@ export interface IStorage {
   createAudioRecording(recording: InsertAudioRecording): Promise<AudioRecording>;
   updateAudioRecording(id: string, recording: Partial<AudioRecording>): Promise<AudioRecording | undefined>;
   getAudioRecordingById(id: string): Promise<AudioRecording | undefined>;
+  getActiveAudioRecordingByAttendance(attendanceId: string): Promise<AudioRecording | undefined>;
   getAudioRecordingsByUserId(userId: string): Promise<AudioRecording[]>;
   getAllAudioRecordings(): Promise<(AudioRecording & { user: User })[]>;
   getActiveAudioRecordings(): Promise<(AudioRecording & { user: User })[]>;
@@ -147,6 +148,14 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(audioRecordings)
       .where(eq(audioRecordings.id, id));
+    return recording || undefined;
+  }
+
+  async getActiveAudioRecordingByAttendance(attendanceId: string): Promise<AudioRecording | undefined> {
+    const [recording] = await db
+      .select()
+      .from(audioRecordings)
+      .where(and(eq(audioRecordings.attendanceId, attendanceId), eq(audioRecordings.isActive, true)));
     return recording || undefined;
   }
 

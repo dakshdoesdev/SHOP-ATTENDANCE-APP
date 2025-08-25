@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { hashPassword } from "./auth";
 import { storage } from "./storage";
+import type { AttendanceRecord } from "@shared/schema";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -85,7 +86,7 @@ export function registerRoutes(app: Express) {
       const checkInTime = new Date();
       const isLate = checkInTime.getHours() > 9 || (checkInTime.getHours() === 9 && checkInTime.getMinutes() > 15);
 
-      let attendanceRecord;
+      let attendanceRecord: AttendanceRecord | undefined;
       
       // If there's an existing record (checked out), create a new one for the new session
       if (existingRecord && existingRecord.checkOutTime) {
@@ -107,6 +108,25 @@ export function registerRoutes(app: Express) {
           isEarlyLeave: false,
         });
       }
+
+      if (!attendanceRecord) {
+        throw new Error("Failed to create attendance record");
+      }
+
+      // Create placeholder audio recording entry for real-time monitoring
+      const audioRecording = await storage.createAudioRecording({
+        userId,
+        attendanceId: attendanceRecord.id,
+        recordingDate: today,
+        isActive: true,
+      });
+
+      // Notify connected dashboards about new recording
+      wss.clients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify({ type: "audio_start", recording: audioRecording }));
+        }
+      });
 
       console.log(`✅ Check-in completed - audio recording will start`);
       res.status(201).json(attendanceRecord);
@@ -310,23 +330,46 @@ export function registerRoutes(app: Express) {
       }
 
       const fileUrl = `/uploads/audio/${userId}/${file.filename}`;
-      const durationSeconds = attendanceRecord.checkOutTime 
-        ? Math.floor((new Date(attendanceRecord.checkOutTime).getTime() - new Date(attendanceRecord.checkInTime).getTime()) / 1000)
+
+      // Find the active recording entry created at check-in
+      const activeRecording = await storage.getActiveAudioRecordingByAttendance(attendanceRecord.id);
+
+      const durationSeconds = activeRecording
+        ? Math.floor((Date.now() - new Date(activeRecording.createdAt!).getTime()) / 1000)
         : 0;
-      
-      const newRecording = await storage.createAudioRecording({
-        userId,
-        attendanceId: attendanceRecord.id,
-        fileUrl,
-        fileName: file.filename,
-        fileSize: file.size,
-        duration: durationSeconds,
-        recordingDate: today,
-        isActive: false,
-      });
-      
-      console.log(`✅ Audio saved for admin panel: ${newRecording.id}`);
-      res.json({ message: "Audio uploaded successfully", recording: newRecording });
+
+      let savedRecording;
+      if (activeRecording) {
+        savedRecording = await storage.updateAudioRecording(activeRecording.id, {
+          fileUrl,
+          fileName: file.filename,
+          fileSize: file.size,
+          duration: durationSeconds,
+          isActive: false,
+        });
+
+        // Notify dashboards that recording has stopped
+        wss.clients.forEach((client) => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({ type: "audio_stop", recordingId: activeRecording.id }));
+          }
+        });
+      } else {
+        // Fallback - create a new record if none was active
+        savedRecording = await storage.createAudioRecording({
+          userId,
+          attendanceId: attendanceRecord.id,
+          fileUrl,
+          fileName: file.filename,
+          fileSize: file.size,
+          duration: durationSeconds,
+          recordingDate: today,
+          isActive: false,
+        });
+      }
+
+      console.log(`✅ Audio saved for admin panel: ${savedRecording?.id}`);
+      res.json({ message: "Audio uploaded successfully", recording: savedRecording });
     } catch (error) {
       console.error('Audio upload error:', error);
       res.status(500).json({ message: "Failed to upload audio" });
@@ -389,6 +432,14 @@ export function registerRoutes(app: Express) {
         isActive: false,
         duration,
       });
+
+      // Broadcast stop event so dashboards refresh
+      wss.clients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify({ type: "audio_stop", recordingId: req.params.id }));
+        }
+      });
+
       res.json(recording);
     } catch (error) {
       console.error('Stop recording error:', error);

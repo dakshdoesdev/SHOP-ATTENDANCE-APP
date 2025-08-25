@@ -406,6 +406,36 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  app.delete("/api/admin/audio/:id", async (req, res) => {
+    try {
+      const recording = await storage.getAudioRecordingById(req.params.id);
+      if (!recording) {
+        return res.status(404).json({ message: "Recording not found" });
+      }
+
+      if (recording.fileName) {
+        const filePath = path.join(
+          __dirname,
+          'uploads',
+          'audio',
+          recording.userId,
+          recording.fileName
+        );
+        try {
+          await fs.promises.unlink(filePath);
+        } catch (err) {
+          console.warn('File delete error:', err);
+        }
+      }
+
+      await storage.deleteAudioRecording(req.params.id);
+      res.json({ message: "Recording deleted" });
+    } catch (error) {
+      console.error('Delete recording error:', error);
+      res.status(500).json({ message: "Failed to delete recording" });
+    }
+  });
+
   return httpServer;
 }
 

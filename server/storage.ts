@@ -22,9 +22,11 @@ export interface IStorage {
   // Audio methods
   createAudioRecording(recording: InsertAudioRecording): Promise<AudioRecording>;
   updateAudioRecording(id: string, recording: Partial<AudioRecording>): Promise<AudioRecording | undefined>;
+  getAudioRecordingById(id: string): Promise<AudioRecording | undefined>;
   getAudioRecordingsByUserId(userId: string): Promise<AudioRecording[]>;
   getAllAudioRecordings(): Promise<(AudioRecording & { user: User })[]>;
   getActiveAudioRecordings(): Promise<(AudioRecording & { user: User })[]>;
+  deleteAudioRecording(id: string): Promise<void>;
   deleteOldAudioRecordings(daysOld: number): Promise<void>;
   
   // Admin methods
@@ -140,6 +142,14 @@ export class DatabaseStorage implements IStorage {
     return updatedRecording || undefined;
   }
 
+  async getAudioRecordingById(id: string): Promise<AudioRecording | undefined> {
+    const [recording] = await db
+      .select()
+      .from(audioRecordings)
+      .where(eq(audioRecordings.id, id));
+    return recording || undefined;
+  }
+
   async getAudioRecordingsByUserId(userId: string): Promise<AudioRecording[]> {
     return await db
       .select()
@@ -186,6 +196,10 @@ export class DatabaseStorage implements IStorage {
       .from(audioRecordings)
       .innerJoin(users, eq(audioRecordings.userId, users.id))
       .where(eq(audioRecordings.isActive, true));
+  }
+
+  async deleteAudioRecording(id: string): Promise<void> {
+    await db.delete(audioRecordings).where(eq(audioRecordings.id, id));
   }
 
   async deleteOldAudioRecordings(daysOld: number): Promise<void> {

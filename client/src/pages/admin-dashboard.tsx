@@ -40,6 +40,10 @@ export default function AdminDashboard() {
     refetchInterval: 30000,
   });
 
+  const { data: employees } = useQuery<User[]>({
+    queryKey: ["/api/admin/employees"],
+  });
+
   const audioForm = useForm<z.infer<typeof audioPasswordSchema>>({
     resolver: zodResolver(audioPasswordSchema),
     defaultValues: {
@@ -65,13 +69,9 @@ export default function AdminDashboard() {
   };
 
   const getStats = () => {
-    if (!todayAttendance) return { total: 0, present: 0, late: 0, absent: 0 };
-
-    const present = todayAttendance.length;
-    const late = todayAttendance.filter(record => record.isLate).length;
-    
-    // Mock total employees - in real app this would come from a separate query
-    const total = 24;
+    const total = employees?.length ?? 0;
+    const present = todayAttendance?.length ?? 0;
+    const late = todayAttendance?.filter(record => record.isLate).length ?? 0;
     const absent = total - present;
 
     return { total, present, late, absent };

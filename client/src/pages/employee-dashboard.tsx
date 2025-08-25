@@ -27,8 +27,8 @@ export default function EmployeeDashboard() {
     error: null,
   });
 
-  // Real-time timer state
-  const [currentTime, setCurrentTime] = useState(new Date());
+  // Real-time hours worked state
+  const [hoursWorked, setHoursWorked] = useState("0h 0m");
   const [isRecording, setIsRecording] = useState(false);
 
   // Fetch today's attendance
@@ -134,14 +134,29 @@ export default function EmployeeDashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  // Real-time timer effect
+  // Real-time hours worked effect
   useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000);
+    const updateHoursWorked = () => {
+      if (!todayAttendance?.checkInTime) {
+        setHoursWorked("0h 0m");
+        return;
+      }
 
-    return () => clearInterval(timer);
-  }, []);
+      const checkInTime = new Date(todayAttendance.checkInTime);
+      const endTime = todayAttendance.checkOutTime
+        ? new Date(todayAttendance.checkOutTime)
+        : new Date();
+
+      const diffMs = endTime.getTime() - checkInTime.getTime();
+      const hours = Math.floor(diffMs / (1000 * 60 * 60));
+      const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+      setHoursWorked(`${hours}h ${minutes}m`);
+    };
+
+    updateHoursWorked();
+    const interval = setInterval(updateHoursWorked, 1000);
+    return () => clearInterval(interval);
+  }, [todayAttendance]);
 
   // Update recording status based on attendance
   useEffect(() => {
@@ -166,21 +181,6 @@ export default function EmployeeDashboard() {
         variant: "destructive",
       });
     }
-  };
-
-  const getHoursWorked = (): string => {
-    if (!todayAttendance?.checkInTime) return "0h 0m";
-    
-    const checkInTime = new Date(todayAttendance.checkInTime);
-    const endTime = todayAttendance.checkOutTime
-      ? new Date(todayAttendance.checkOutTime)
-      : currentTime; // Use current time for real-time updates
-    
-    const diffMs = endTime.getTime() - checkInTime.getTime();
-    const hours = Math.floor(diffMs / (1000 * 60 * 60));
-    const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-    
-    return `${hours}h ${minutes}m`;
   };
 
   const isCheckedIn = todayAttendance && !todayAttendance.checkOutTime;
@@ -309,7 +309,7 @@ export default function EmployeeDashboard() {
                   <span className="text-gray-600">Hours Worked:</span>
                   <div className="flex items-center space-x-2">
                     <span className="font-medium" data-testid="text-hours-worked">
-                      {getHoursWorked()}
+                      {hoursWorked}
                     </span>
                     {isCheckedIn && (
                       <div className="flex items-center">

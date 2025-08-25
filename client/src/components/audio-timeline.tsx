@@ -86,8 +86,11 @@ export function AudioTimeline({ fileUrl, startTime, duration, audioRef }: AudioT
     if (!ctx) return;
 
     const draw = () => {
-      const width = canvas.width;
-      const height = canvas.height;
+      // Ensure canvas matches its display size
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
+      if (canvas.width !== width) canvas.width = width;
+      if (canvas.height !== height) canvas.height = height;
       const timelineHeight = 12;
       const waveformHeight = height - timelineHeight;
       ctx.clearRect(0, 0, width, height);
@@ -151,10 +154,24 @@ export function AudioTimeline({ fileUrl, startTime, duration, audioRef }: AudioT
     return totalDuration > 0 ? formatTime(totalDuration) : "";
   })();
 
+  const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!audioRef?.current || totalDuration <= 0) return;
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const width = rect.width;
+    audioRef.current.currentTime = (x / width) * totalDuration;
+  };
+
   return (
     <div className="flex items-center gap-2 mt-2">
       <span className="text-xs text-gray-600 w-14 text-left">{startLabel}</span>
-      <canvas ref={canvasRef} width={400} height={50} className="h-12 flex-1" />
+      <canvas
+        ref={canvasRef}
+        width={400}
+        height={50}
+        className="h-12 flex-1 cursor-pointer"
+        onClick={handleClick}
+      />
       <span className="text-xs text-gray-600 w-14 text-right">{endLabel}</span>
     </div>
   );

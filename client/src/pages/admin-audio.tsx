@@ -168,21 +168,9 @@ export default function AdminAudio() {
 
   useEffect(() => {
     if (selectedRecording && audioRef.current) {
-      audioRef.current.currentTime = 0;
+      audioRef.current.pause();
       audioRef.current.src = selectedRecording.fileUrl!;
-      audioRef.current.play().then(() => {
-        toast({
-          title: "Audio playback",
-          description: `Playing ${selectedRecording.fileName}`,
-        });
-      }).catch((error) => {
-        console.error('Audio play error:', error);
-        toast({
-          title: "Playback failed",
-          description: error.message,
-          variant: "destructive",
-        });
-      });
+      audioRef.current.currentTime = 0;
     }
   }, [selectedRecording]);
 

@@ -29,8 +29,9 @@ export default function EmployeeHistory() {
     }
   };
 
-  const formatTime = (timestamp: string) => {
-    return new Date(timestamp).toLocaleTimeString([], {
+  const formatTime = (timestamp: string | Date) => {
+    const date = typeof timestamp === 'string' ? new Date(timestamp) : timestamp;
+    return date.toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit'
     });

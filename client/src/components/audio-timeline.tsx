@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from "react";
 
 interface AudioTimelineProps {
   fileUrl: string;
+  startTime?: string | Date;
+  duration?: number; // seconds
 }
 
-export function AudioTimeline({ fileUrl }: AudioTimelineProps) {
+export function AudioTimeline({ fileUrl, startTime, duration }: AudioTimelineProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [segments, setSegments] = useState<number[]>([]);
 
@@ -47,13 +49,31 @@ export function AudioTimeline({ fileUrl }: AudioTimelineProps) {
     segments.forEach((value, index) => {
       const x = (index / segments.length) * width;
       const barWidth = width / segments.length;
-      const barHeight = value * height;
-      ctx.fillStyle = value > 0.05 ? "#2563eb" : "#cbd5e1";
-      ctx.fillRect(x, height - barHeight, barWidth, barHeight);
+      const barHeight = value * (height - 20); // leave space for labels
+      ctx.fillStyle = value > 0.05 ? "#facc15" : "#e5e7eb"; // yellow for voice
+      ctx.fillRect(x, (height - 20) - barHeight, barWidth, barHeight);
     });
-  }, [segments]);
 
-  return <canvas ref={canvasRef} width={400} height={60} className="w-full h-16" />;
+    const startLabel = startTime
+      ? new Date(startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : '0:00';
+    const endLabel = (() => {
+      if (startTime && typeof duration === 'number') {
+        const end = new Date(new Date(startTime).getTime() + duration * 1000);
+        return end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+      return duration ? `${duration}s` : '';
+    })();
+
+    ctx.fillStyle = '#4b5563';
+    ctx.font = '12px sans-serif';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(startLabel, 0, height);
+    const endWidth = ctx.measureText(endLabel).width;
+    ctx.fillText(endLabel, width - endWidth, height);
+  }, [segments, startTime, duration]);
+
+  return <canvas ref={canvasRef} width={600} height={80} className="w-full h-20" />;
 }
 
 export default AudioTimeline;

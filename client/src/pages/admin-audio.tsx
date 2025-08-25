@@ -1,5 +1,5 @@
 import { useAuth } from "@/hooks/use-auth";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, Fragment } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -232,7 +232,11 @@ export default function AdminAudio() {
       });
       return;
     }
-    setSelectedRecording(recording);
+    if (selectedRecording?.id === recording.id) {
+      setSelectedRecording(null);
+    } else {
+      setSelectedRecording(recording);
+    }
   };
 
   const handleDelete = (recordingId: string) => {
@@ -363,59 +367,83 @@ export default function AdminAudio() {
                   </TableHeader>
                   <TableBody>
                     {allRecordings?.map((recording) => (
-                      <TableRow key={recording.id} data-testid={`row-recording-${recording.id}`}>
-                        <TableCell>
-                          <div>
-                            <div className="font-medium text-gray-900">
-                              {recording.user.username}
+                      <Fragment key={recording.id}>
+                        <TableRow data-testid={`row-recording-${recording.id}`}>
+                          <TableCell>
+                            <div>
+                              <div className="font-medium text-gray-900">
+                                {recording.user.username}
+                              </div>
+                              <div className="text-sm text-gray-500">
+                                {recording.user.employeeId}
+                              </div>
                             </div>
-                            <div className="text-sm text-gray-500">
-                              {recording.user.employeeId}
+                          </TableCell>
+                          <TableCell>{formatDate(recording.recordingDate)}</TableCell>
+                          <TableCell>
+                            {recording.duration ? formatDuration(recording.duration) : "N/A"}
+                          </TableCell>
+                          <TableCell>
+                            {recording.fileSize ? formatFileSize(recording.fileSize) : "N/A"}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex space-x-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-primary hover:text-blue-700"
+                                onClick={() => handlePlay(recording)}
+                                data-testid={`button-play-${recording.id}`}
+                              >
+                                <Play className="h-4 w-4 mr-1" />
+                                {selectedRecording?.id === recording.id ? 'Hide' : 'Play'}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-primary hover:text-blue-700"
+                                onClick={() => handleDownload(recording)}
+                                data-testid={`button-download-${recording.id}`}
+                              >
+                                <Download className="h-4 w-4 mr-1" />
+                                Download
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-red-600 hover:text-red-700"
+                                onClick={() => handleDelete(recording.id)}
+                                data-testid={`button-delete-${recording.id}`}
+                              >
+                                <Trash2 className="h-4 w-4 mr-1" />
+                                Delete
+                              </Button>
                             </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>{formatDate(recording.recordingDate)}</TableCell>
-                        <TableCell>
-                          {recording.duration ? formatDuration(recording.duration) : "N/A"}
-                        </TableCell>
-                        <TableCell>
-                          {recording.fileSize ? formatFileSize(recording.fileSize) : "N/A"}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex space-x-2">
-                            <Button 
-                              variant="ghost" 
-                              size="sm"
-                              className="text-primary hover:text-blue-700"
-                              onClick={() => handlePlay(recording)}
-                              data-testid={`button-play-${recording.id}`}
-                            >
-                              <Play className="h-4 w-4 mr-1" />
-                              Play
-                            </Button>
-                            <Button 
-                              variant="ghost" 
-                              size="sm"
-                              className="text-primary hover:text-blue-700"
-                              onClick={() => handleDownload(recording)}
-                              data-testid={`button-download-${recording.id}`}
-                            >
-                              <Download className="h-4 w-4 mr-1" />
-                              Download
-                            </Button>
-                            <Button 
-                              variant="ghost" 
-                              size="sm"
-                              className="text-red-600 hover:text-red-700"
-                              onClick={() => handleDelete(recording.id)}
-                              data-testid={`button-delete-${recording.id}`}
-                            >
-                              <Trash2 className="h-4 w-4 mr-1" />
-                              Delete
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
+                          </TableCell>
+                        </TableRow>
+                        {selectedRecording?.id === recording.id && (
+                          <TableRow>
+                            <TableCell colSpan={5}>
+                              <div className="space-y-2">
+                                <div className="flex justify-between items-center">
+                                  <span className="font-medium truncate">{recording.fileName}</span>
+                                  <Button variant="ghost" size="sm" onClick={() => setSelectedRecording(null)}>
+                                    <X className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                                <audio ref={audioRef} controls className="w-full" />
+                                {recording.fileUrl && (
+                                  <AudioTimeline
+                                    fileUrl={recording.fileUrl}
+                                    startTime={recording.createdAt ?? undefined}
+                                    duration={recording.duration || 0}
+                                  />
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
                     ))}
                     {!allRecordings || allRecordings.length === 0 ? (
                       <TableRow>
@@ -477,21 +505,6 @@ export default function AdminAudio() {
           </CardContent>
         </Card>
       </div>
-
-      {selectedRecording && (
-        <div className="fixed bottom-4 right-4 bg-white shadow-lg rounded-lg p-4 w-96">
-          <div className="flex justify-between items-center mb-2">
-            <span className="font-medium truncate">{selectedRecording.fileName}</span>
-            <Button variant="ghost" size="sm" onClick={() => setSelectedRecording(null)}>
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-          <audio ref={audioRef} controls className="w-full mb-2" />
-          {selectedRecording.fileUrl && (
-            <AudioTimeline fileUrl={selectedRecording.fileUrl} />
-          )}
-        </div>
-      )}
     </div>
   );
 }

@@ -207,7 +207,7 @@ export class DatabaseStorage implements IStorage {
         try {
           await fs.promises.unlink(filePath);
         } catch (err) {
-          console.warn('''File delete error:''', err);
+          console.warn('File delete error:', err);
         }
       }
 

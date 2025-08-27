@@ -75,15 +75,15 @@ export class AudioRecorder {
       this.mediaRecorder.onstop = async () => {
         const blob = new Blob(this.chunks, { type: 'audio/webm;codecs=opus' });
         const duration = this.startTime ? Math.floor((Date.now() - this.startTime.getTime()) / 1000) : 0;
-        
+
         console.log(`🔴 Recording stopped - Duration: ${duration}s, Size: ${blob.size} bytes`);
-        
+
         if (blob.size > 0) {
-          await this.uploadAudio(blob);
+          await this.uploadAudio(blob, duration);
         } else {
           console.warn('⚠️ Recording blob is empty, skipping upload');
         }
-        
+
         this.cleanup();
         resolve(blob);
       };
@@ -93,14 +93,15 @@ export class AudioRecorder {
     });
   }
 
-  private async uploadAudio(blob: Blob): Promise<void> {
+  private async uploadAudio(blob: Blob, duration: number): Promise<void> {
     try {
       console.log(`📤 Uploading audio blob: ${blob.size} bytes`);
-      
+
       const formData = new FormData();
       const timestamp = Date.now();
       const filename = `recording-${timestamp}.webm`;
       formData.append('audio', blob, filename);
+      formData.append('duration', duration.toString());
 
       const response = await fetch('/api/audio/upload', {
         method: 'POST',

@@ -73,10 +73,10 @@ export function registerRoutes(app: Express) {
       const userId = req.user.id;
       const today = new Date().toISOString().split('T')[0];
       
-      // Check if already checked in today (and not checked out)
+      // Check if already checked in today
       const existingRecord = await storage.getTodayAttendanceRecord(userId, today);
-      if (existingRecord && !existingRecord.checkOutTime) {
-        return res.status(400).json({ message: "Already checked in today" });
+      if (existingRecord) {
+        return res.status(400).json({ message: "Attendance already recorded for today" });
       }
 
       // GPS validation - COMPLETELY DISABLED FOR TESTING
@@ -85,28 +85,31 @@ export function registerRoutes(app: Express) {
       const checkInTime = new Date();
       const isLate = checkInTime.getHours() > 9 || (checkInTime.getHours() === 9 && checkInTime.getMinutes() > 15);
 
-      let attendanceRecord;
-      
-      // If there's an existing record (checked out), create a new one for the new session
-      if (existingRecord && existingRecord.checkOutTime) {
-        // Create new record for new check-in session
-        attendanceRecord = await storage.createAttendanceRecord({
-          userId,
-          checkInTime,
-          date: today,
-          isLate,
-          isEarlyLeave: false,
-        });
-      } else if (!existingRecord) {
-        // Create first record of the day
-        attendanceRecord = await storage.createAttendanceRecord({
-          userId,
-          checkInTime,
-          date: today,
-          isLate,
-          isEarlyLeave: false,
-        });
-      }
+      const attendanceRecord = await storage.createAttendanceRecord({
+        userId,
+        checkInTime,
+        date: today,
+        isLate,
+        isEarlyLeave: false,
+      });
+
+      // Ensure only one audio record per user per day
+      const existingAudio = await storage.getAudioRecordingByUserAndDate(userId, today);
+      const audioRecording = existingAudio
+        ? await storage.updateAudioRecording(existingAudio.id, { isActive: true })
+        : await storage.createAudioRecording({
+            userId,
+            attendanceId: attendanceRecord.id,
+            recordingDate: today,
+            isActive: true,
+          });
+
+      // Notify connected dashboards about new recording session
+      wss.clients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify({ type: "audio_start", recording: audioRecording }));
+        }
+      });
 
       console.log(`✅ Check-in completed - audio recording will start`);
       res.status(201).json(attendanceRecord);
@@ -196,6 +199,55 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  app.post("/api/admin/attendance/checkin", async (req, res) => {
+    if (!req.isAuthenticated() || req.user?.role !== "admin") {
+      return res.status(401).json({ message: "Admin access required" });
+    }
+
+    try {
+      const { userId } = req.body;
+      const today = new Date().toISOString().split('T')[0];
+      const existingRecord = await storage.getTodayAttendanceRecord(userId, today);
+      if (existingRecord) {
+        return res.status(400).json({ message: "Attendance already recorded for today" });
+      }
+
+      const checkInTime = new Date();
+      const isLate = checkInTime.getHours() > 9 || (checkInTime.getHours() === 9 && checkInTime.getMinutes() > 15);
+
+      const attendanceRecord = await storage.createAttendanceRecord({
+        userId,
+        checkInTime,
+        date: today,
+        isLate,
+        isEarlyLeave: false,
+      });
+
+      res.status(201).json(attendanceRecord);
+    } catch (error) {
+      console.error('Admin manual check-in error:', error);
+      res.status(500).json({ message: "Failed to check in employee" });
+    }
+  });
+
+  app.put("/api/admin/attendance/:id", async (req, res) => {
+    if (!req.isAuthenticated() || req.user?.role !== "admin") {
+      return res.status(401).json({ message: "Admin access required" });
+    }
+
+    try {
+      const { isLate } = req.body;
+      const updated = await storage.updateAttendanceRecord(req.params.id, { isLate });
+      if (!updated) {
+        return res.status(404).json({ message: "Attendance record not found" });
+      }
+      res.json(updated);
+    } catch (error) {
+      console.error('Update attendance error:', error);
+      res.status(500).json({ message: "Failed to update attendance" });
+    }
+  });
+
   app.get("/api/admin/employees", async (req, res) => {
     if (!req.isAuthenticated() || req.user?.role !== "admin") {
       return res.status(401).json({ message: "Admin access required" });
@@ -236,6 +288,25 @@ export function registerRoutes(app: Express) {
     } catch (error) {
       console.error('Create employee error:', error);
       res.status(500).json({ message: "Failed to create employee" });
+    }
+  });
+
+  app.put("/api/admin/employees/:id", async (req, res) => {
+    if (!req.isAuthenticated() || req.user?.role !== "admin") {
+      return res.status(401).json({ message: "Admin access required" });
+    }
+
+    try {
+      const { username, employeeId, department, password } = req.body;
+      const updateData: any = { username, employeeId, department };
+      if (password) {
+        updateData.password = await hashPassword(password);
+      }
+      const user = await storage.updateUser(req.params.id, updateData);
+      res.json(user);
+    } catch (error) {
+      console.error('Update employee error:', error);
+      res.status(500).json({ message: "Failed to update employee" });
     }
   });
 
@@ -310,23 +381,53 @@ export function registerRoutes(app: Express) {
       }
 
       const fileUrl = `/uploads/audio/${userId}/${file.filename}`;
-      const durationSeconds = attendanceRecord.checkOutTime 
-        ? Math.floor((new Date(attendanceRecord.checkOutTime).getTime() - new Date(attendanceRecord.checkInTime).getTime()) / 1000)
-        : 0;
-      
-      const newRecording = await storage.createAudioRecording({
-        userId,
-        attendanceId: attendanceRecord.id,
-        fileUrl,
-        fileName: file.filename,
-        fileSize: file.size,
-        duration: durationSeconds,
-        recordingDate: today,
-        isActive: false,
-      });
-      
-      console.log(`✅ Audio saved for admin panel: ${newRecording.id}`);
-      res.json({ message: "Audio uploaded successfully", recording: newRecording });
+
+      // Ensure single recording per user per day
+      let recording = await storage.getAudioRecordingByUserAndDate(userId, today);
+
+      const clientDuration = req.body.duration ? parseInt(req.body.duration, 10) : undefined;
+      const durationSeconds = clientDuration !== undefined
+        ? clientDuration
+        : recording && recording.createdAt
+          ? Math.floor((Date.now() - new Date(recording.createdAt).getTime()) / 1000)
+          : 0;
+
+      let savedRecording;
+      if (recording) {
+        savedRecording = await storage.updateAudioRecording(recording.id, {
+          fileUrl,
+          fileName: file.filename,
+          fileSize: file.size,
+          duration: durationSeconds,
+          recordingDate: today,
+          isActive: false,
+        });
+
+        // Notify dashboards that recording has stopped
+        if (recording.isActive) {
+          wss.clients.forEach((client) => {
+            if (client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify({ type: "audio_stop", recordingId: recording.id }));
+            }
+          });
+        }
+      } else {
+        savedRecording = await storage.createAudioRecording({
+          userId,
+          attendanceId: attendanceRecord.id,
+          fileUrl,
+          fileName: file.filename,
+          fileSize: file.size,
+          duration: durationSeconds,
+          recordingDate: today,
+          isActive: false,
+        });
+      }
+
+      await storage.enforceAudioStorageLimit(30 * 1024 * 1024 * 1024);
+
+      console.log(`✅ Audio saved for admin panel: ${savedRecording?.id}`);
+      res.json({ message: "Audio uploaded successfully", recording: savedRecording });
     } catch (error) {
       console.error('Audio upload error:', error);
       res.status(500).json({ message: "Failed to upload audio" });
@@ -376,19 +477,27 @@ export function registerRoutes(app: Express) {
 
   app.post("/api/admin/audio/stop/:id", async (req, res) => {
     try {
-      // Get the recording to calculate duration
-      const recordings = await storage.getAllAudioRecordings();
-      const currentRecording = recordings.find(r => r.id === req.params.id);
-      
+      const currentRecording = await storage.getAudioRecordingById(req.params.id);
+
       let duration = 0;
-      if (currentRecording && currentRecording.createdAt) {
+      if (currentRecording?.createdAt) {
         duration = Math.floor((Date.now() - new Date(currentRecording.createdAt).getTime()) / 1000);
       }
-      
+
+      const today = new Date().toISOString().split('T')[0];
       const recording = await storage.updateAudioRecording(req.params.id, {
         isActive: false,
         duration,
+        recordingDate: currentRecording?.recordingDate || today,
       });
+
+      // Broadcast stop event so dashboards refresh
+      wss.clients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify({ type: "audio_stop", recordingId: req.params.id }));
+        }
+      });
+
       res.json(recording);
     } catch (error) {
       console.error('Stop recording error:', error);

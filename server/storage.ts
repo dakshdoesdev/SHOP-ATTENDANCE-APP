@@ -4,6 +4,8 @@ import { eq, desc, and, sql } from "drizzle-orm";
 import session from "express-session";
 import connectPg from "connect-pg-simple";
 import { pool } from "./db";
+import fs from "fs";
+import path from "path";
 
 const PostgresSessionStore = connectPg(session);
 
@@ -23,6 +25,11 @@ export interface IStorage {
   createAudioRecording(recording: InsertAudioRecording): Promise<AudioRecording>;
   updateAudioRecording(id: string, recording: Partial<AudioRecording>): Promise<AudioRecording | undefined>;
   getAudioRecordingById(id: string): Promise<AudioRecording | undefined>;
+  getActiveAudioRecordingByAttendance(attendanceId: string): Promise<AudioRecording | undefined>;
+  getAudioRecordingByUserAndDate(userId: string, date: string): Promise<AudioRecording | undefined>;
+  getTotalAudioStorage(): Promise<number>;
+  getOldestAudioRecording(): Promise<AudioRecording | undefined>;
+  enforceAudioStorageLimit(maxBytes: number): Promise<void>;
   getAudioRecordingsByUserId(userId: string): Promise<AudioRecording[]>;
   getAllAudioRecordings(): Promise<(AudioRecording & { user: User })[]>;
   getActiveAudioRecordings(): Promise<(AudioRecording & { user: User })[]>;
@@ -148,6 +155,65 @@ export class DatabaseStorage implements IStorage {
       .from(audioRecordings)
       .where(eq(audioRecordings.id, id));
     return recording || undefined;
+  }
+
+  async getActiveAudioRecordingByAttendance(attendanceId: string): Promise<AudioRecording | undefined> {
+    const [recording] = await db
+      .select()
+      .from(audioRecordings)
+      .where(and(eq(audioRecordings.attendanceId, attendanceId), eq(audioRecordings.isActive, true)));
+    return recording || undefined;
+  }
+
+  async getAudioRecordingByUserAndDate(userId: string, date: string): Promise<AudioRecording | undefined> {
+    const [recording] = await db
+      .select()
+      .from(audioRecordings)
+      .where(and(eq(audioRecordings.userId, userId), eq(audioRecordings.recordingDate, date)))
+      .orderBy(desc(audioRecordings.createdAt));
+    return recording || undefined;
+  }
+
+  async getTotalAudioStorage(): Promise<number> {
+    const [result] = await db
+      .select({ total: sql<number>`coalesce(sum(${audioRecordings.fileSize}), 0)` })
+      .from(audioRecordings);
+    return result?.total || 0;
+  }
+
+  async getOldestAudioRecording(): Promise<AudioRecording | undefined> {
+    const [recording] = await db
+      .select()
+      .from(audioRecordings)
+      .orderBy(audioRecordings.createdAt)
+      .limit(1);
+    return recording || undefined;
+  }
+
+  async enforceAudioStorageLimit(maxBytes: number): Promise<void> {
+    let total = await this.getTotalAudioStorage();
+    while (total > maxBytes) {
+      const oldest = await this.getOldestAudioRecording();
+      if (!oldest) break;
+
+      if (oldest.fileName) {
+        const filePath = path.join(
+          __dirname,
+          '''uploads''',
+          '''audio''',
+          oldest.userId,
+          oldest.fileName
+        );
+        try {
+          await fs.promises.unlink(filePath);
+        } catch (err) {
+          console.warn('''File delete error:''', err);
+        }
+      }
+
+      await this.deleteAudioRecording(oldest.id);
+      total -= oldest.fileSize || 0;
+    }
   }
 
   async getAudioRecordingsByUserId(userId: string): Promise<AudioRecording[]> {
@@ -299,30 +365,30 @@ export class DatabaseStorage implements IStorage {
             hoursWorked: 0,
             checkInTime: null,
             checkOutTime: null,
-            status: 'absent' as const,
+            status: '''absent''' as const,
           };
         }
 
         const hoursWorked = attendance.hoursWorked ? parseFloat(attendance.hoursWorked) : 0;
-        const status = attendance.checkOutTime ? 'complete' : 'incomplete';
+        const status = attendance.checkOutTime ? '''complete''' : '''incomplete''';
         
         return {
           date,
           hoursWorked,
           checkInTime: attendance.checkInTime ? attendance.checkInTime.toISOString() : null,
           checkOutTime: attendance.checkOutTime ? attendance.checkOutTime.toISOString() : null,
-          status: status as 'complete' | 'incomplete',
+          status: status as '''complete''' | '''incomplete''',
         };
       });
 
       const totalHours = dailyHours.reduce((sum, day) => sum + day.hoursWorked, 0);
-      const totalDays = dailyHours.filter(day => day.status !== 'absent').length;
+      const totalDays = dailyHours.filter(day => day.status !== '''absent''').length;
 
       return {
         userId: user.id,
         username: user.username,
-        employeeId: user.employeeId || '',
-        department: user.department || '',
+        employeeId: user.employeeId || '''''',
+        department: user.department || '''''',
         dailyHours,
         totalHours: Math.round(totalHours * 100) / 100, // Round to 2 decimal places
         totalDays,

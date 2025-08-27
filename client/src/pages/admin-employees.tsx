@@ -24,12 +24,22 @@ const createEmployeeSchema = z.object({
   department: z.string().min(1, "Department is required"),
 });
 
+const editEmployeeSchema = z.object({
+  username: z.string().min(1, "Username is required"),
+  employeeId: z.string().min(1, "Employee ID is required"),
+  department: z.string().min(1, "Department is required"),
+  password: z.string().min(6, "Password must be at least 6 characters").optional(),
+});
+
 type CreateEmployeeData = z.infer<typeof createEmployeeSchema>;
+type EditEmployeeData = z.infer<typeof editEmployeeSchema>;
 
 export default function AdminEmployees() {
   const { user, logoutMutation } = useAuth();
   const { toast } = useToast();
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState<User | null>(null);
 
   const { data: employees, isLoading } = useQuery<User[]>({
     queryKey: ["/api/admin/employees"],
@@ -78,6 +88,28 @@ export default function AdminEmployees() {
     },
   });
 
+  const updateEmployeeMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: EditEmployeeData }) => {
+      const res = await apiRequest("PUT", `/api/admin/employees/${id}`, data);
+      return await res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/employees"] });
+      setEditDialogOpen(false);
+      toast({
+        title: "Employee updated",
+        description: "Employee details have been updated",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to update employee",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   const form = useForm<CreateEmployeeData>({
     resolver: zodResolver(createEmployeeSchema),
     defaultValues: {
@@ -88,14 +120,40 @@ export default function AdminEmployees() {
     },
   });
 
+  const editForm = useForm<EditEmployeeData>({
+    resolver: zodResolver(editEmployeeSchema),
+    defaultValues: {
+      username: "",
+      employeeId: "",
+      department: "",
+      password: "",
+    },
+  });
+
   const onSubmit = (data: CreateEmployeeData) => {
     createEmployeeMutation.mutate(data);
+  };
+
+  const onEditSubmit = (data: EditEmployeeData) => {
+    if (!editingEmployee) return;
+    updateEmployeeMutation.mutate({ id: editingEmployee.id, data });
   };
 
   const handleDelete = (employeeId: string) => {
     if (confirm("Are you sure you want to delete this employee?")) {
       deleteEmployeeMutation.mutate(employeeId);
     }
+  };
+
+  const handleEdit = (employee: User) => {
+    setEditingEmployee(employee);
+    editForm.reset({
+      username: employee.username,
+      employeeId: employee.employeeId || "",
+      department: employee.department || "",
+      password: "",
+    });
+    setEditDialogOpen(true);
   };
 
   return (
@@ -211,6 +269,93 @@ export default function AdminEmployees() {
                 </Form>
               </DialogContent>
             </Dialog>
+            <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Edit Employee</DialogTitle>
+                </DialogHeader>
+                <Form {...editForm}>
+                  <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4">
+                    <FormField
+                      control={editForm.control}
+                      name="username"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Username</FormLabel>
+                          <FormControl>
+                            <Input {...field} data-testid="input-edit-username" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={editForm.control}
+                      name="employeeId"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Employee ID</FormLabel>
+                          <FormControl>
+                            <Input {...field} data-testid="input-edit-employee-id" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={editForm.control}
+                      name="department"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Department</FormLabel>
+                          <FormControl>
+                            <Input {...field} data-testid="input-edit-department" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={editForm.control}
+                      name="password"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Password</FormLabel>
+                          <FormControl>
+                            <Input type="password" {...field} data-testid="input-edit-password" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <div className="flex space-x-3">
+                      <Button
+                        type="submit"
+                        className="flex-1 bg-primary hover:bg-blue-700"
+                        disabled={updateEmployeeMutation.isPending}
+                        data-testid="button-update-employee"
+                      >
+                        {updateEmployeeMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Update Employee
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="flex-1"
+                        onClick={() => setEditDialogOpen(false)}
+                        data-testid="button-cancel-edit"
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </form>
+                </Form>
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
       </div>
@@ -264,10 +409,11 @@ export default function AdminEmployees() {
                         </TableCell>
                         <TableCell>
                           <div className="flex space-x-2">
-                            <Button 
-                              variant="ghost" 
+                            <Button
+                              variant="ghost"
                               size="sm"
                               className="text-primary hover:text-blue-700"
+                              onClick={() => handleEdit(employee)}
                               data-testid={`button-edit-${employee.id}`}
                             >
                               <Edit className="h-4 w-4 mr-1" />

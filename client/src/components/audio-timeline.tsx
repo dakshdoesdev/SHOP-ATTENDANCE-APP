@@ -1,13 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 
+// Renders a waveform timeline with optional start/end time labels
+
 interface AudioTimelineProps {
   fileUrl: string;
+  startTime?: string | Date;
+  duration?: number; // seconds
+  audioRef?: React.RefObject<HTMLAudioElement>;
 }
 
-export function AudioTimeline({ fileUrl }: AudioTimelineProps) {
+export function AudioTimeline({ fileUrl, startTime, duration, audioRef }: AudioTimelineProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [segments, setSegments] = useState<number[]>([]);
+  const animationRef = useRef<number>();
+  const [totalDuration, setTotalDuration] = useState<number>(duration && duration > 0 ? duration : 0);
 
+  // Analyze the audio file once to generate simple amplitude segments
   useEffect(() => {
     const analyze = async () => {
       try {
@@ -34,24 +42,141 @@ export function AudioTimeline({ fileUrl }: AudioTimelineProps) {
     analyze();
   }, [fileUrl]);
 
+  // Keep track of the total duration using prop or audio metadata
+  useEffect(() => {
+    if (duration && duration > 0) {
+      setTotalDuration(duration);
+    }
+  }, [duration]);
+
+  useEffect(() => {
+    if (!audioRef?.current) return;
+    const audio = audioRef.current;
+    const update = () => {
+      if (audio.duration && (!duration || duration === 0)) {
+        setTotalDuration(audio.duration);
+      }
+    };
+    audio.addEventListener("loadedmetadata", update);
+    update();
+    return () => {
+      audio.removeEventListener("loadedmetadata", update);
+    };
+  }, [audioRef, duration]);
+
+  // Format seconds into H:MM
+  const formatTime = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    return h > 0 ? `${h}:${m.toString().padStart(2, "0")}` : `${m}m`;
+  };
+
+  // Determine interval for timeline markers
+  const getInterval = (total: number) => {
+    if (total > 3600) return 3600; // 1 hour
+    if (total > 600) return 600; // 10 minutes
+    return 60; // 1 minute
+  };
+
+  // Draw waveform, timeline, and playback progress
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || segments.length === 0) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const width = canvas.width;
-    const height = canvas.height;
-    ctx.clearRect(0, 0, width, height);
-    segments.forEach((value, index) => {
-      const x = (index / segments.length) * width;
-      const barWidth = width / segments.length;
-      const barHeight = value * height;
-      ctx.fillStyle = value > 0.05 ? "#2563eb" : "#cbd5e1";
-      ctx.fillRect(x, height - barHeight, barWidth, barHeight);
-    });
-  }, [segments]);
 
-  return <canvas ref={canvasRef} width={400} height={60} className="w-full h-16" />;
+    const draw = () => {
+      // Ensure canvas matches its display size
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
+      if (canvas.width !== width) canvas.width = width;
+      if (canvas.height !== height) canvas.height = height;
+      const timelineHeight = 16;
+      const waveformHeight = height - timelineHeight;
+      ctx.clearRect(0, 0, width, height);
+
+      // Draw waveform bars
+      segments.forEach((value, index) => {
+        const x = (index / segments.length) * width;
+        const barWidth = width / segments.length;
+        const barHeight = value * waveformHeight;
+        ctx.fillStyle = value > 0.01 ? "#facc15" : "#e5e7eb"; // yellow for voice
+        ctx.fillRect(x, waveformHeight - barHeight, barWidth, barHeight);
+      });
+
+      const total = totalDuration;
+
+      // Draw timeline markers
+      if (total > 0) {
+        const interval = getInterval(total);
+        for (let t = interval; t < total; t += interval) {
+          const x = (t / total) * width;
+          ctx.strokeStyle = "#94a3b8";
+          ctx.beginPath();
+          ctx.moveTo(x, waveformHeight);
+          ctx.lineTo(x, waveformHeight + 4);
+          ctx.stroke();
+
+          const label = formatTime(t);
+          ctx.fillStyle = "#475569";
+          ctx.font = "10px sans-serif";
+          const textWidth = ctx.measureText(label).width;
+          ctx.fillText(label, x - textWidth / 2, height - 2);
+        }
+      }
+
+      // Draw progress indicator
+      const audio = audioRef?.current;
+      if (audio && total > 0) {
+        const progress = audio.currentTime / total;
+        ctx.fillStyle = "rgba(0,0,0,0.5)";
+        ctx.fillRect(progress * width, 0, 2, waveformHeight);
+      }
+
+      animationRef.current = requestAnimationFrame(draw);
+    };
+
+    draw();
+    return () => {
+      if (animationRef.current) cancelAnimationFrame(animationRef.current);
+    };
+  }, [segments, audioRef, totalDuration]);
+
+  const startLabel = startTime
+    ? new Date(startTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : "0:00";
+
+  const endLabel = (() => {
+    if (startTime && totalDuration > 0) {
+      const end = new Date(new Date(startTime).getTime() + totalDuration * 1000);
+      return end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+    return totalDuration > 0 ? formatTime(totalDuration) : "";
+  })();
+
+  const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!audioRef?.current || totalDuration <= 0) return;
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const width = rect.width;
+    const audio = audioRef.current;
+    audio.currentTime = (x / width) * totalDuration;
+    audio.play().catch(() => {});
+  };
+
+  return (
+    <div className="flex items-center gap-2 mt-2">
+      <span className="text-xs text-gray-600 w-14 text-left">{startLabel}</span>
+      <canvas
+        ref={canvasRef}
+        width={400}
+        height={80}
+        className="h-20 flex-1 cursor-pointer"
+        onClick={handleClick}
+      />
+      <span className="text-xs text-gray-600 w-14 text-right">{endLabel}</span>
+    </div>
+  );
 }
 
 export default AudioTimeline;

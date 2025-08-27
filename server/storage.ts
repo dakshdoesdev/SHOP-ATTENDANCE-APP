@@ -199,8 +199,8 @@ export class DatabaseStorage implements IStorage {
       if (oldest.fileName) {
         const filePath = path.join(
           __dirname,
-          '''uploads''',
-          '''audio''',
+          'uploads',
+          'audio',
           oldest.userId,
           oldest.fileName
         );

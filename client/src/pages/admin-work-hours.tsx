@@ -21,11 +21,17 @@ import {
   AlertCircle
 } from "lucide-react";
 
+const getMonthString = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+};
+
 export default function AdminWorkHours() {
   const { user } = useAuth();
-  
+
   // Get current month as default (YYYY-MM format)
-  const currentMonth = new Date().toISOString().slice(0, 7);
+  const currentMonth = getMonthString(new Date());
   const [selectedMonth, setSelectedMonth] = useState(currentMonth);
 
   const { data: workHoursData, isLoading, error } = useQuery<MonthlyWorkHoursResponse>({
@@ -44,10 +50,10 @@ export default function AdminWorkHours() {
     
     for (let i = 0; i < 12; i++) {
       const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const monthStr = date.toISOString().slice(0, 7);
-      const displayName = date.toLocaleDateString('en-US', { 
-        year: 'numeric', 
-        month: 'long' 
+      const monthStr = getMonthString(date);
+      const displayName = date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long'
       });
       options.push({ value: monthStr, label: displayName });
     }

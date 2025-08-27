@@ -91,7 +91,7 @@ export function AudioTimeline({ fileUrl, startTime, duration, audioRef }: AudioT
       const height = canvas.clientHeight;
       if (canvas.width !== width) canvas.width = width;
       if (canvas.height !== height) canvas.height = height;
-      const timelineHeight = 12;
+      const timelineHeight = 16;
       const waveformHeight = height - timelineHeight;
       ctx.clearRect(0, 0, width, height);
 
@@ -100,7 +100,7 @@ export function AudioTimeline({ fileUrl, startTime, duration, audioRef }: AudioT
         const x = (index / segments.length) * width;
         const barWidth = width / segments.length;
         const barHeight = value * waveformHeight;
-        ctx.fillStyle = value > 0.02 ? "#facc15" : "#e5e7eb"; // yellow for voice
+        ctx.fillStyle = value > 0.01 ? "#facc15" : "#e5e7eb"; // yellow for voice
         ctx.fillRect(x, waveformHeight - barHeight, barWidth, barHeight);
       });
 
@@ -159,7 +159,9 @@ export function AudioTimeline({ fileUrl, startTime, duration, audioRef }: AudioT
     const rect = canvasRef.current!.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const width = rect.width;
-    audioRef.current.currentTime = (x / width) * totalDuration;
+    const audio = audioRef.current;
+    audio.currentTime = (x / width) * totalDuration;
+    audio.play().catch(() => {});
   };
 
   return (
@@ -168,8 +170,8 @@ export function AudioTimeline({ fileUrl, startTime, duration, audioRef }: AudioT
       <canvas
         ref={canvasRef}
         width={400}
-        height={50}
-        className="h-12 flex-1 cursor-pointer"
+        height={80}
+        className="h-20 flex-1 cursor-pointer"
         onClick={handleClick}
       />
       <span className="text-xs text-gray-600 w-14 text-right">{endLabel}</span>

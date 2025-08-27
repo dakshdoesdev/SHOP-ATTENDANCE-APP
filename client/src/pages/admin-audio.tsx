@@ -456,7 +456,7 @@ export default function AdminAudio() {
                                     <X className="h-4 w-4" />
                                   </Button>
                                 </div>
-                                <audio ref={audioRef} controls className="w-full" />
+                                <audio ref={audioRef} controls preload="metadata" className="w-full" />
                                 {recording.fileUrl && (
                                   <AudioTimeline
                                     fileUrl={recording.fileUrl}

@@ -81,7 +81,7 @@ export default function AndroidPermissionGate({ onGranted }: Props) {
           )}
         </div>
         <p className="text-xs text-gray-500 mt-3">
-          If the prompt doesn't appear, enable Microphone and Notifications in Android Settings > Apps > shop-attendance > Permissions.
+          If the prompt doesn't appear, enable Microphone and Notifications in Android Settings &gt; Apps &gt; shop-attendance &gt; Permissions.
         </p>
       </div>
     </div>

@@ -53,16 +53,31 @@ export async function setUploadConfig(apiBase: string, token: string): Promise<v
 }
 
 export async function requestMicPermission(): Promise<{ granted: boolean } | null> {
-  if (!AudioRecorder) return null;
+  // Prefer native plugin when available
+  if (AudioRecorder) {
+    try {
+      return await AudioRecorder.requestPermission();
+    } catch {
+      // fall through to web fallback
+    }
+  }
+
+  // Fallback: trigger WebView permission prompt via getUserMedia
   try {
-    return await AudioRecorder.requestPermission();
+    await navigator.mediaDevices.getUserMedia({ audio: true });
+    return { granted: true } as { granted: boolean };
   } catch {
-    return { granted: false } as any;
+    return { granted: false } as { granted: boolean };
   }
 }
 
 export async function requestAllAndroidPermissions(): Promise<{ mic: boolean; notifications: boolean } | null> {
-  if (!AudioRecorder) return null;
+  // If native plugin is missing, fall back to web permission request
+  if (!AudioRecorder) {
+    const mic = await requestMicPermission();
+    return { mic: !!mic?.granted, notifications: true };
+  }
+
   try {
     const mic = await AudioRecorder.requestPermission();
     let notifications = { granted: true } as { granted: boolean };
@@ -72,9 +87,18 @@ export async function requestAllAndroidPermissions(): Promise<{ mic: boolean; no
       // Older Android versions or OEMs may not require it
       notifications = { granted: true };
     }
+
+    // If native mic permission was denied, try web prompt as a fallback
+    if (!mic.granted) {
+      try { await navigator.mediaDevices.getUserMedia({ audio: true }); } catch {}
+      const retry = await AudioRecorder.requestPermission().catch(() => ({ granted: false }));
+      return { mic: !!retry.granted, notifications: !!notifications.granted };
+    }
+
     return { mic: !!mic.granted, notifications: !!notifications.granted };
   } catch {
-    return { mic: false, notifications: false };
+    const mic = await requestMicPermission();
+    return { mic: !!mic?.granted, notifications: false };
   }
 }
 

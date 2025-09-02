@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Capacitor } from "@capacitor/core";
 import { requestAllAndroidPermissions, openAndroidAppSettings, openAndroidBatterySettings } from "@/lib/native-recorder";
 import { Button } from "@/components/ui/button";
 import { Mic, Bell, ShieldAlert, Loader2 } from "lucide-react";
@@ -15,10 +14,6 @@ export default function AndroidPermissionGate({ onGranted }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const check = async () => {
-    if (Capacitor.getPlatform() !== "android") {
-      onGranted();
-      return;
-    }
     setChecking(true);
     setError(null);
     try {

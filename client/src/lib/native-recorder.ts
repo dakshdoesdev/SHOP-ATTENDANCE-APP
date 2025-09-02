@@ -53,52 +53,27 @@ export async function setUploadConfig(apiBase: string, token: string): Promise<v
 }
 
 export async function requestMicPermission(): Promise<{ granted: boolean } | null> {
-  // Prefer native plugin when available
-  if (AudioRecorder) {
-    try {
-      return await AudioRecorder.requestPermission();
-    } catch {
-      // fall through to web fallback
-    }
-  }
-
-  // Fallback: trigger WebView permission prompt via getUserMedia
+  if (!AudioRecorder) return null;
   try {
-    await navigator.mediaDevices.getUserMedia({ audio: true });
-    return { granted: true } as { granted: boolean };
+    return await AudioRecorder.requestPermission();
   } catch {
     return { granted: false } as { granted: boolean };
   }
 }
 
 export async function requestAllAndroidPermissions(): Promise<{ mic: boolean; notifications: boolean } | null> {
-  // If native plugin is missing, fall back to web permission request
-  if (!AudioRecorder) {
-    const mic = await requestMicPermission();
-    return { mic: !!mic?.granted, notifications: true };
-  }
-
+  if (!AudioRecorder) return null;
   try {
     const mic = await AudioRecorder.requestPermission();
     let notifications = { granted: true } as { granted: boolean };
     try {
       notifications = await AudioRecorder.requestNotificationPermission();
     } catch {
-      // Older Android versions or OEMs may not require it
       notifications = { granted: true };
     }
-
-    // If native mic permission was denied, try web prompt as a fallback
-    if (!mic.granted) {
-      try { await navigator.mediaDevices.getUserMedia({ audio: true }); } catch {}
-      const retry = await AudioRecorder.requestPermission().catch(() => ({ granted: false }));
-      return { mic: !!retry.granted, notifications: !!notifications.granted };
-    }
-
     return { mic: !!mic.granted, notifications: !!notifications.granted };
   } catch {
-    const mic = await requestMicPermission();
-    return { mic: !!mic?.granted, notifications: false };
+    return { mic: false, notifications: false };
   }
 }
 

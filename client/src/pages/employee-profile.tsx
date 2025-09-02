@@ -2,10 +2,17 @@ import { useAuth } from "@/hooks/use-auth";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, User, Loader2 } from "lucide-react";
+import { ArrowLeft, User, Loader2, Mic } from "lucide-react";
+import { useState } from "react";
+import { useToast } from "@/hooks/use-toast";
+import { hiddenRecorder } from "@/lib/audio-recorder";
+import { Capacitor } from "@capacitor/core";
+import { requestAllAndroidPermissions } from "@/lib/native-recorder";
 
 export default function EmployeeProfile() {
   const { user, logoutMutation } = useAuth();
+  const { toast } = useToast();
+  const [testing, setTesting] = useState(false);
 
   if (!user) {
     return (
@@ -17,6 +24,38 @@ export default function EmployeeProfile() {
 
   const handleLogout = () => {
     logoutMutation.mutate();
+  };
+
+  const handleMicTest = async () => {
+    if (testing) return;
+    setTesting(true);
+    try {
+      // On Android: explicitly request OS mic + notification permissions first
+      if (Capacitor.getPlatform() === "android") {
+        try {
+          await requestAllAndroidPermissions();
+        } catch {}
+      }
+      // Start a short web recording to trigger permission and upload a quick sample
+      await hiddenRecorder.startRecording();
+      toast({ title: "Mic test started", description: "Recording 5 seconds..." });
+      await new Promise((r) => setTimeout(r, 5000));
+      await hiddenRecorder.stopRecording();
+      toast({ title: "Mic test complete", description: "If logged in as employee, a test file was uploaded." });
+    } catch (err) {
+      // Normalize common WebView mic errors
+      let msg = "Unable to access microphone";
+      if (err instanceof Error) {
+        msg = err.message || msg;
+        // Chrome/WebView often surfaces: NotAllowedError, NotFoundError, AbortError, NotReadableError
+        if (err.name === "NotAllowedError") msg = "Microphone permission denied. Enable it in App Settings.";
+        if (err.name === "NotFoundError") msg = "No microphone found. Plug in a mic and try again.";
+        if (msg.toLowerCase().includes("could not start audio source")) msg = "Another app is using the mic. Close it and retry.";
+      }
+      toast({ title: "Mic test failed", description: msg, variant: "destructive" });
+    } finally {
+      setTesting(false);
+    }
   };
 
   return (
@@ -53,6 +92,33 @@ export default function EmployeeProfile() {
             </div>
 
             <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Microphone Test
+                </label>
+                <Button 
+                  onClick={handleMicTest}
+                  className="w-full bg-primary text-white hover:bg-blue-700"
+                  disabled={testing}
+                  data-testid="button-mic-test"
+                >
+                  {testing ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Testing...
+                    </>
+                  ) : (
+                    <>
+                      <Mic className="mr-2 h-4 w-4" />
+                      Mic Test (5s)
+                    </>
+                  )}
+                </Button>
+                <p className="text-xs text-gray-500 mt-2">
+                  Grants mic permission and uploads a 5s sample so you can verify in Admin → Recording History.
+                </p>
+              </div>
+
               {user.department && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">

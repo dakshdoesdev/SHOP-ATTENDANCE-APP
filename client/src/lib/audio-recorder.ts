@@ -1,9 +1,37 @@
+import { API_BASE } from "./queryClient";
+
 export class AudioRecorder {
   private mediaRecorder: MediaRecorder | null = null;
   private stream: MediaStream | null = null;
   private chunks: Blob[] = [];
   private isRecording = false;
   private startTime: Date | null = null;
+  private lastUploadAt: number | null = null;
+  private chosenMimeType: string | null = null;
+  private fileExtension: string = 'webm';
+
+  private pickSupportedMime(): void {
+    try {
+      const candidates = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/mp4',
+        'audio/aac'
+      ];
+      for (const t of candidates) {
+        if ((window as any).MediaRecorder && (MediaRecorder as any).isTypeSupported && MediaRecorder.isTypeSupported(t)) {
+          this.chosenMimeType = t;
+          this.fileExtension = t.includes('mp4') || t.includes('aac') ? 'm4a' : 'webm';
+          return;
+        }
+      }
+      this.chosenMimeType = null;
+      this.fileExtension = 'webm';
+    } catch {
+      this.chosenMimeType = null;
+      this.fileExtension = 'webm';
+    }
+  }
 
   async startRecording(): Promise<void> {
     if (this.isRecording) {
@@ -21,14 +49,16 @@ export class AudioRecorder {
         }
       });
 
-      const options = {
-        mimeType: 'audio/webm;codecs=opus',
-        audioBitsPerSecond: 128000,
-      };
+      this.pickSupportedMime();
+
+      const options: MediaRecorderOptions = this.chosenMimeType
+        ? { mimeType: this.chosenMimeType, audioBitsPerSecond: 128000 }
+        : { audioBitsPerSecond: 128000 };
 
       this.mediaRecorder = new MediaRecorder(this.stream, options);
       this.chunks = [];
       this.startTime = new Date();
+      this.lastUploadAt = Date.now();
 
       this.mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -73,7 +103,7 @@ export class AudioRecorder {
       }
 
       this.mediaRecorder.onstop = async () => {
-        const blob = new Blob(this.chunks, { type: 'audio/webm;codecs=opus' });
+        const blob = new Blob(this.chunks, { type: this.chosenMimeType || 'audio/webm' });
         const duration = this.startTime ? Math.floor((Date.now() - this.startTime.getTime()) / 1000) : 0;
 
         console.log(`🔴 Recording stopped - Duration: ${duration}s, Size: ${blob.size} bytes`);
@@ -99,11 +129,11 @@ export class AudioRecorder {
 
       const formData = new FormData();
       const timestamp = Date.now();
-      const filename = `recording-${timestamp}.webm`;
+      const filename = `recording-${timestamp}.${this.fileExtension}`;
       formData.append('audio', blob, filename);
       formData.append('duration', duration.toString());
 
-      const response = await fetch('/api/audio/upload', {
+      const response = await fetch(`${API_BASE}/api/audio/upload`, {
         method: 'POST',
         body: formData,
         credentials: 'include'
@@ -120,6 +150,27 @@ export class AudioRecorder {
     } catch (error) {
       console.error('❌ Audio upload error:', error);
       // Don't throw here to avoid breaking the UI flow
+    }
+  }
+
+  // Upload a partial segment while still recording (does not stop the recorder)
+  async uploadCurrentSegment(): Promise<void> {
+    if (!this.isRecording) return;
+    if (!this.mediaRecorder) return;
+    // Build a blob from the chunks collected so far
+    const pending = this.chunks;
+    if (!pending || pending.length === 0) return;
+    const blob = new Blob(pending, { type: this.chosenMimeType || 'audio/webm' });
+    // Compute segment duration based on time since last upload
+    const now = Date.now();
+    let duration = 0;
+    if (this.lastUploadAt) duration = Math.max(0, Math.floor((now - this.lastUploadAt) / 1000));
+    this.lastUploadAt = now;
+    // Reset chunks so subsequent data isn't re-uploaded
+    this.chunks = [];
+    // Perform upload if there is data
+    if (blob.size > 0) {
+      await this.uploadAudio(blob, duration);
     }
   }
 

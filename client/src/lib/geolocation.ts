@@ -1,30 +1,46 @@
+import { Capacitor } from "@capacitor/core";
+import { Geolocation as CapGeolocation } from "@capacitor/geolocation";
+
 export interface LocationData {
   latitude: number;
   longitude: number;
   accuracy: number;
 }
 
-export function getCurrentPosition(): Promise<LocationData> {
+export async function getCurrentPosition(): Promise<LocationData> {
+  const isNative = Capacitor.isNativePlatform();
+  if (isNative) {
+    try {
+      const perm = await CapGeolocation.checkPermissions();
+      if (perm.location !== "granted") {
+        const req = await CapGeolocation.requestPermissions();
+        if (req.location !== "granted") {
+          throw new Error("Location permission denied");
+        }
+      }
+      const pos = await CapGeolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000 });
+      return {
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+        accuracy: pos.coords.accuracy ?? 0,
+      };
+    } catch (err) {
+      // Fall back to browser API on error
+    }
+  }
+
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
       reject(new Error("Geolocation is not supported by this browser"));
       return;
     }
-
-    const options = {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 60000, // 1 minute
-    };
-
+    const options = { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 };
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        resolve({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-        });
-      },
+      (position) => resolve({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+      }),
       (error) => {
         switch (error.code) {
           case error.PERMISSION_DENIED:
@@ -41,7 +57,7 @@ export function getCurrentPosition(): Promise<LocationData> {
             break;
         }
       },
-      options
+      options,
     );
   });
 }
@@ -50,19 +66,16 @@ export function calculateDistance(
   lat1: number,
   lon1: number,
   lat2: number,
-  lon2: number
+  lon2: number,
 ): number {
-  const R = 6371e3; // Earth's radius in meters
-  const φ1 = (lat1 * Math.PI) / 180;
-  const φ2 = (lat2 * Math.PI) / 180;
-  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+  const R = 6371e3; // meters
+  const phi1 = (lat1 * Math.PI) / 180;
+  const phi2 = (lat2 * Math.PI) / 180;
+  const dphi = ((lat2 - lat1) * Math.PI) / 180;
+  const dlambda = ((lon2 - lon1) * Math.PI) / 180;
 
-  const a =
-    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const a = Math.sin(dphi / 2) ** 2 + Math.cos(phi1) * Math.cos(phi2) * Math.sin(dlambda / 2) ** 2;
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
   return R * c;
 }
 
@@ -72,3 +85,4 @@ export const SHOP_LOCATION = {
 } as const;
 
 export const MAX_DISTANCE = 15000; // meters - increased for testing
+

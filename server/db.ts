@@ -8,5 +8,40 @@ if (!process.env.DATABASE_URL) {
   );
 }
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+// Optional dev override to bypass TLS verification when encountering
+// "self signed certificate in certificate chain" in certain networks.
+// Set PG_NO_SSL_VERIFY=true in .env to enable (NOT recommended for production).
+const noSslVerify = (process.env.PG_NO_SSL_VERIFY || '').toLowerCase() === 'true';
+if (noSslVerify) {
+  // As a last resort, disable TLS verification process-wide in dev
+  // This helps when corporate proxies MITM TLS and pg still rejects certs
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+}
+
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  // Only set ssl options when explicitly requested via env toggle
+  // Otherwise respect ssl settings from the connection string (e.g., sslmode=require)
+  ...(noSslVerify ? { ssl: { rejectUnauthorized: false } } : {}),
+});
 export const db = drizzle(pool, { schema });
+
+// Avoid crashing the process on transient database shutdowns (e.g., Supabase auto-pause)
+// pg emits 'error' on the pool when a backend connection dies unexpectedly.
+pool.on('error', (err) => {
+  // Log and let future queries reconnect instead of bringing down the server
+  console.error('Unexpected Postgres pool error. Will retry on next query:', err);
+});
+
+// Best-effort warm-up to wake paused databases (e.g., Supabase free tier)
+export async function ensureDbReady(retries = 10, delayMs = 1500): Promise<void> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await pool.query('select 1');
+      return;
+    } catch (err) {
+      if (i === retries - 1) throw err;
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+}

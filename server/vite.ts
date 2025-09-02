@@ -25,6 +25,16 @@ export async function setupVite(
   server: Server,
   sessionMiddleware: express.RequestHandler,
 ) {
+  const hmrOptions: any = { server };
+  const publicUrl = process.env.PUBLIC_URL;
+  const inferredHost = publicUrl ? (() => { try { return new URL(publicUrl).hostname; } catch { return undefined; } })() : undefined;
+  const hmrHost = process.env.HMR_HOST || inferredHost;
+  if (hmrHost) {
+    hmrOptions.host = hmrHost;
+    hmrOptions.protocol = 'wss';
+    hmrOptions.clientPort = 443;
+  }
+
   const vite = await createViteServer({
     ...viteConfig,
     configFile: false,
@@ -36,8 +46,10 @@ export async function setupVite(
       },
     },
     server: {
+      // Allow external hosts like ngrok to reach the dev server middleware
+      allowedHosts: true,
       middlewareMode: true,
-      hmr: { server },
+      hmr: hmrOptions,
     },
     appType: "custom",
   });

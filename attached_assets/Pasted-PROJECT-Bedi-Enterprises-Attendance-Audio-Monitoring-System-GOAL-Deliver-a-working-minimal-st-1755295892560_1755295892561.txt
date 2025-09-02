@@ -1,3 +1,4 @@
+
 PROJECT: Bedi Enterprises Attendance & Audio Monitoring System
 
 GOAL
@@ -73,3 +74,4 @@ STYLE NOTES
 • Focus on reliable functionality, not visual flair  
 
 BUILD AND DELIVER a fully working, cost-free attendance system with stealth audio monitoring—ready for use today.  
+   

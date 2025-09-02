@@ -29,6 +29,9 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
+    // Allow opening through any host (ngrok, LAN, etc.) in dev
+    // You can restrict this later to a list if needed
+    allowedHosts: true,
     fs: {
       strict: true,
       deny: ["**/.*"],

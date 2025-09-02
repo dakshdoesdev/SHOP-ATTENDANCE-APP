@@ -365,30 +365,30 @@ export class DatabaseStorage implements IStorage {
             hoursWorked: 0,
             checkInTime: null,
             checkOutTime: null,
-            status: '''absent''' as const,
+            status: 'absent' as const,
           };
         }
 
         const hoursWorked = attendance.hoursWorked ? parseFloat(attendance.hoursWorked) : 0;
-        const status = attendance.checkOutTime ? '''complete''' : '''incomplete''';
+        const status: DailyWorkHours['status'] = attendance.checkOutTime ? 'complete' : 'incomplete';
         
         return {
           date,
           hoursWorked,
           checkInTime: attendance.checkInTime ? attendance.checkInTime.toISOString() : null,
           checkOutTime: attendance.checkOutTime ? attendance.checkOutTime.toISOString() : null,
-          status: status as '''complete''' | '''incomplete''',
+          status,
         };
       });
 
       const totalHours = dailyHours.reduce((sum, day) => sum + day.hoursWorked, 0);
-      const totalDays = dailyHours.filter(day => day.status !== '''absent''').length;
+      const totalDays = dailyHours.filter(day => day.status !== 'absent').length;
 
       return {
         userId: user.id,
         username: user.username,
-        employeeId: user.employeeId || '''''',
-        department: user.department || '''''',
+        employeeId: user.employeeId || '',
+        department: user.department || '',
         dailyHours,
         totalHours: Math.round(totalHours * 100) / 100, // Round to 2 decimal places
         totalDays,

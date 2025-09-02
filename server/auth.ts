@@ -1,4 +1,5 @@
 import passport from "passport";
+import jwt from "jsonwebtoken";
 import { Strategy as LocalStrategy } from "passport-local";
 import { Express } from "express";
 import session from "express-session";
@@ -52,13 +53,19 @@ export function setupAuth(app: Express) {
   // Create test employee on startup
   createTestEmployee();
 
+  const corsEnabled = !!process.env.CORS_ORIGIN;
+  const cookieSameSite = (process.env.COOKIE_SAMESITE as any) || (corsEnabled ? 'none' : 'lax');
+  // If SameSite=None, cookie must be Secure
+  const cookieSecure = (process.env.COOKIE_SECURE === 'true') || (cookieSameSite === 'none') || (process.env.NODE_ENV === 'production');
+
   const sessionSettings: session.SessionOptions = {
     secret: process.env.SESSION_SECRET || "bedi-enterprises-secret-key-2025",
     resave: false,
     saveUninitialized: false,
     store: storage.sessionStore,
     cookie: {
-      secure: process.env.NODE_ENV === "production",
+      secure: cookieSecure,
+      sameSite: cookieSameSite as any,
       httpOnly: true,
       maxAge: 2 * 60 * 60 * 1000, // 2 hours
     },
@@ -99,6 +106,7 @@ export function setupAuth(app: Express) {
           department: null,
           joinDate: null,
           isActive: true,
+          isLoggedIn: false,
           createdAt: null,
         };
         return done(null, adminUser);
@@ -124,14 +132,10 @@ export function setupAuth(app: Express) {
         return res.status(401).json({ message: info?.message || "Invalid credentials" });
       }
 
-      if (user.isLoggedIn) {
-        return res.status(403).json({ message: "User already logged in elsewhere" });
-      }
-
       req.login(user, (err) => {
         if (err) return next(err);
-        storage.updateUser(user.id, { isLoggedIn: true }).catch(console.error);
-        res.status(200).json({ ...user, isLoggedIn: true });
+        // Do not enforce or update an "already logged in" flag
+        res.status(200).json(user);
       });
     })(req, res, next);
   });
@@ -140,9 +144,6 @@ export function setupAuth(app: Express) {
     const userId = req.user?.id;
     req.logout((err) => {
       if (err) return next(err);
-      if (userId) {
-        storage.updateUser(userId, { isLoggedIn: false }).catch(console.error);
-      }
       res.sendStatus(200);
     });
   });
@@ -150,6 +151,15 @@ export function setupAuth(app: Express) {
   app.get("/api/user", (req, res) => {
     if (!req.isAuthenticated()) return res.sendStatus(401);
     res.json(req.user);
+  });
+
+  // Issue short-lived JWT for background/native uploads
+  app.post("/api/auth/upload-token", (req, res) => {
+    if (!req.isAuthenticated()) return res.sendStatus(401);
+    if (req.user?.role !== "employee") return res.status(403).json({ message: "Employee token only" });
+    const secret = process.env.JWT_SECRET || "upload-secret-2025";
+    const token = jwt.sign({ sub: req.user.id, role: req.user.role }, secret, { expiresIn: "1d" });
+    res.json({ token });
   });
 
   // Admin login endpoint
@@ -171,6 +181,7 @@ export function setupAuth(app: Express) {
         department: null,
         joinDate: null,
         isActive: true,
+        isLoggedIn: false,
         createdAt: null,
       };
 

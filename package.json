@@ -8,10 +8,21 @@
     "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
     "start": "cross-env NODE_ENV=production node dist/index.js",
     "check": "tsc",
+    "db": "drizzle-kit push",
     "db:push": "drizzle-kit push",
-    "test": "echo \"No tests specified\""
+    "db:push:insecure": "cross-env NODE_TLS_REJECT_UNAUTHORIZED=0 drizzle-kit push",
+    "db:push:insecure:force": "cross-env NODE_TLS_REJECT_UNAUTHORIZED=0 drizzle-kit push --force",
+    "test": "echo \"No tests specified\"",
+    "set:api": "tsx tools/set-api-base.ts",
+    "set:api:auto": "tsx tools/set-api-base.ts auto",
+    "android:sync": "npm run build && npx cap sync android",
+    "android:open": "npx cap open android",
+    "android:install": "cd android && gradlew.bat installDebug",
+    "android:run": "npm run set:api -- %API% && npm run build && npx cap sync android && cd android && gradlew.bat installDebug"
   },
   "dependencies": {
+    "@capacitor/android": "^7.4.3",
+    "@capacitor/geolocation": "^7.1.5",
     "@hookform/resolvers": "^3.10.0",
     "@jridgewell/trace-mapping": "^0.3.25",
     "@neondatabase/serverless": "^0.10.4",
@@ -57,6 +68,7 @@
     "embla-carousel-react": "^8.6.0",
     "express": "^4.21.2",
     "express-session": "^1.18.1",
+    "jsonwebtoken": "^9.0.2",
     "framer-motion": "^11.13.1",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.453.0",
@@ -86,6 +98,8 @@
     "zod-validation-error": "^3.4.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "^7.4.3",
+    "@capacitor/core": "^7.4.3",
     "@replit/vite-plugin-cartographer": "^0.2.8",
     "@replit/vite-plugin-runtime-error-modal": "^0.0.3",
     "@tailwindcss/typography": "^0.5.15",
@@ -94,6 +108,7 @@
     "@types/express": "4.17.21",
     "@types/express-session": "^1.18.0",
     "@types/node": "20.16.11",
+    "@types/jsonwebtoken": "^9.0.6",
     "@types/passport": "^1.0.16",
     "@types/passport-local": "^1.0.38",
     "@types/pg": "^8.15.5",

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { requestAllAndroidPermissions, openAndroidAppSettings, openAndroidBatterySettings } from "@/lib/native-recorder";
+import { requestAllAndroidPermissions, openAndroidAppSettings, openAndroidBatterySettings, startBackgroundRecording, stopBackgroundRecording } from "@/lib/native-recorder";
 import { Button } from "@/components/ui/button";
 import { Mic, Bell, ShieldAlert, Loader2 } from "lucide-react";
 
@@ -17,6 +17,22 @@ export default function AndroidPermissionGate({ onGranted }: Props) {
     setChecking(true);
     setError(null);
     try {
+      // 1) Attempt real start/stop. If it works, both permissions are effectively granted.
+      let started = false;
+      try {
+        await startBackgroundRecording();
+        await stopBackgroundRecording();
+        started = true;
+      } catch {}
+
+      if (started) {
+        setMicGranted(true);
+        setNotifGranted(true);
+        onGranted();
+        return;
+      }
+
+      // 2) Otherwise, fall back to explicit permission checks.
       const perms = await requestAllAndroidPermissions();
       const mg = !!perms?.mic;
       const ng = perms?.notifications !== false; // treat undefined as granted for older Android

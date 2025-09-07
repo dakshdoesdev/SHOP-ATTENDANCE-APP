@@ -78,6 +78,34 @@ export function setupAuth(app: Express) {
   app.use(passport.initialize());
   app.use(passport.session());
 
+  // Bearer token fallback: allow Authorization: Bearer <jwt> to authenticate
+  // This enables Android app usage over HTTP (LAN) without relying on cookies.
+  app.use((req, res, next) => {
+    try {
+      // If already authenticated via session, continue
+      if (typeof req.isAuthenticated === 'function' && req.isAuthenticated()) {
+        return next();
+      }
+      const auth = req.headers.authorization || "";
+      if (!auth.startsWith("Bearer ")) return next();
+      const token = auth.slice(7);
+      const secret = process.env.JWT_SECRET || "upload-secret-2025";
+      const payload: any = jwt.verify(token, secret);
+      if (!payload?.sub) return next();
+      storage.getUser(payload.sub)
+        .then((user) => {
+          if (user) {
+            (req as any).user = user;
+            // Monkey-patch to satisfy downstream checks
+            (req as any).isAuthenticated = () => true;
+          }
+        })
+        .finally(() => next());
+    } catch {
+      return next();
+    }
+  });
+
   passport.use(
     new LocalStrategy(async (username, password, done) => {
       try {
@@ -134,8 +162,16 @@ export function setupAuth(app: Express) {
 
       req.login(user, (err) => {
         if (err) return next(err);
+        // Also issue a short-lived upload token to enable Android native uploads
+        let token: string | undefined = undefined;
+        try {
+          if (user.role === "employee") {
+            const secret = process.env.JWT_SECRET || "upload-secret-2025";
+            token = jwt.sign({ sub: user.id, role: user.role }, secret, { expiresIn: "1d" });
+          }
+        } catch {}
         // Do not enforce or update an "already logged in" flag
-        res.status(200).json(user);
+        res.status(200).json({ ...user, token });
       });
     })(req, res, next);
   });

@@ -8,7 +8,14 @@ async function throwIfResNotOk(res: Response) {
 }
 
 export const API_BASE = (import.meta as any).env?.VITE_API_BASE || "";
-export const FORCE_WEB_RECORDER = ((import.meta as any).env?.VITE_FORCE_WEB_RECORDER || "").toString().toLowerCase() === "true";
+
+function getBearerToken(): string | null {
+  try {
+    return localStorage.getItem("uploadToken");
+  } catch {
+    return null;
+  }
+}
 
 export async function apiRequest(
   method: string,
@@ -16,9 +23,14 @@ export async function apiRequest(
   data?: unknown | undefined,
 ): Promise<Response> {
   const fullUrl = url.startsWith("/") ? `${API_BASE}${url}` : url;
+  const headers: Record<string, string> = {};
+  if (data) headers["Content-Type"] = "application/json";
+  const token = getBearerToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
   const res = await fetch(fullUrl, {
     method,
-    headers: data ? { "Content-Type": "application/json" } : {},
+    headers,
     body: data ? JSON.stringify(data) : undefined,
     credentials: "include",
   });
@@ -35,8 +47,12 @@ export const getQueryFn: <T>(options: {
   async ({ queryKey }) => {
     const path = queryKey.join("/") as string;
     const fullUrl = path.startsWith("/") ? `${API_BASE}${path}` : path;
+    const headers: Record<string, string> = {};
+    const token = getBearerToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
     const res = await fetch(fullUrl, {
       credentials: "include",
+      headers,
     });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {

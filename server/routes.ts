@@ -3,7 +3,6 @@ import type { Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { hashPassword } from "./auth";
 import { storage } from "./storage";
-import { pool } from "./db";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -29,7 +28,8 @@ const audioStorage = multer.diskStorage({
     const mime = (file.mimetype || '').toLowerCase();
     const originalExt = path.extname(file.originalname || '').toLowerCase();
     let ext = '.webm';
-    if (mime.includes('audio/mp4') || mime.includes('audio/m4a')) ext = '.m4a';
+    if (mime.includes('audio/mp4')) ext = '.mp4';
+    else if (mime.includes('audio/m4a')) ext = '.m4a';
     else if (mime.includes('audio/ogg')) ext = '.ogg';
     else if (originalExt) ext = originalExt;
     cb(null, `${date}-${timestamp}${ext}`);
@@ -45,13 +45,20 @@ const upload = multer({
 export function registerRoutes(app: Express, httpServer: Server) {
   // Health check (DB + session)
   app.get("/api/health", async (req, res) => {
-    try {
-      await pool.query("select 1");
-      const auth = req.isAuthenticated();
-      res.json({ ok: true, db: true, authenticated: auth, user: auth ? req.user : null });
-    } catch (e: any) {
-      res.status(500).json({ ok: false, db: false, error: e?.message || String(e) });
+    // If DATABASE_URL is configured, try a lightweight DB ping; otherwise, report db=false
+    if (process.env.DATABASE_URL) {
+      try {
+        const { pool } = await import("./db");
+        await pool.query("select 1");
+        const auth = req.isAuthenticated();
+        res.json({ ok: true, db: true, authenticated: auth, user: auth ? req.user : null });
+      } catch (e: any) {
+        res.status(500).json({ ok: false, db: false, error: e?.message || String(e) });
+      }
+      return;
     }
+    const auth = req.isAuthenticated();
+    res.json({ ok: true, db: false, authenticated: auth, user: auth ? req.user : null });
   });
 
   // WebSocket server for real-time audio control

@@ -133,10 +133,18 @@ export class AudioRecorder {
       formData.append('audio', blob, filename);
       formData.append('duration', duration.toString());
 
+      // Prefer bearer token if available (works in WebView/cross-origin)
+      let headers: Record<string, string> | undefined;
+      try {
+        const token = localStorage.getItem('uploadToken');
+        if (token) headers = { Authorization: `Bearer ${token}` };
+      } catch {}
+
       const response = await fetch(`${API_BASE}/api/audio/upload`, {
         method: 'POST',
         body: formData,
-        credentials: 'include'
+        credentials: 'include',
+        headers,
       });
 
       if (!response.ok) {

@@ -47,18 +47,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await apiRequest("POST", "/api/login", credentials);
       return await res.json();
     },
-    onSuccess: (user: SelectUser) => {
+    onSuccess: async (payload: any) => {
+      const user: SelectUser = payload;
       queryClient.setQueryData(["/api/user"], user);
       toast({
         title: "Login successful",
         description: `Welcome, ${user.username}!`,
       });
-      // For employees on Android, request an upload token and configure native uploader
+      // Store bearer token if provided and configure native uploader
+      try {
+        if (payload?.token) {
+          localStorage.setItem("uploadToken", payload.token);
+        }
+      } catch {}
       if (user.role === "employee" && Capacitor.getPlatform() === "android") {
         (async () => {
           try {
+            const token = ((): string | null => {
+              try { return localStorage.getItem("uploadToken"); } catch { return null; }
+            })();
+            if (token) {
+              await setUploadConfig(API_BASE || "", token);
+              return;
+            }
+          } catch {}
+          // Fallback to API-issued token when cookies are present
+          try {
             const res = await apiRequest("POST", "/api/auth/upload-token");
             const { token } = await res.json();
+            try { localStorage.setItem("uploadToken", token); } catch {}
             await setUploadConfig(API_BASE || "", token);
           } catch {
             // non-fatal
@@ -82,8 +99,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (user.role !== "employee") return;
       if (Capacitor.getPlatform() !== "android") return;
       try {
+        const token = ((): string | null => {
+          try { return localStorage.getItem("uploadToken"); } catch { return null; }
+        })();
+        if (token) {
+          await setUploadConfig(API_BASE || "", token);
+          return;
+        }
+      } catch {}
+      try {
         const res = await apiRequest("POST", "/api/auth/upload-token");
         const { token } = await res.json();
+        try { localStorage.setItem("uploadToken", token); } catch {}
         await setUploadConfig(API_BASE || "", token);
       } catch {
         // non-fatal
@@ -139,6 +166,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     onSuccess: () => {
       queryClient.setQueryData(["/api/user"], null);
+      try { localStorage.removeItem("uploadToken"); } catch {}
       toast({
         title: "Logged out",
         description: "You have been successfully logged out",

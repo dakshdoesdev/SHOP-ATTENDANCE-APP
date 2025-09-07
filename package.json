@@ -18,7 +18,9 @@
     "android:sync": "npm run build && npx cap sync android",
     "android:open": "npx cap open android",
     "android:install": "cd android && gradlew.bat installDebug",
-    "android:run": "npm run set:api -- %API% && npm run build && npx cap sync android && cd android && gradlew.bat installDebug"
+    "android:run": "npm run set:api -- %API% && npm run build && npx cap sync android && cd android && gradlew.bat installDebug",
+    "android:auto": "npm run set:api:auto && npm run build && npx cap sync android && cd android && gradlew.bat installDebug",
+    "android": "npm run android:run"
   },
   "dependencies": {
     "@capacitor/android": "^7.4.3",

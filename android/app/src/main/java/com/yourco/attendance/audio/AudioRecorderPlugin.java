@@ -11,6 +11,7 @@ import android.app.AppOpsManager;
 import android.content.pm.PackageManager;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
+import android.media.MediaRecorder;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -193,6 +194,47 @@ public class AudioRecorderPlugin extends Plugin {
         JSObject ret = new JSObject();
         ret.put("granted", hasNotificationPermission());
         call.resolve(ret);
+    }
+
+    // Debug helper: record a 3-second file directly using MediaRecorder
+    @PluginMethod
+    public void debugTestRecord(PluginCall call) {
+        try {
+            Context ctx = getContext();
+            File outDir = ctx.getExternalFilesDir(android.os.Environment.DIRECTORY_MUSIC);
+            if (outDir != null && !outDir.exists()) outDir.mkdirs();
+            final File out = new File(outDir, "debug_test_" + System.currentTimeMillis() + ".m4a");
+
+            final MediaRecorder recorder = new MediaRecorder();
+            recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+            recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+            recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+            recorder.setAudioEncodingBitRate(16000);
+            recorder.setAudioSamplingRate(16000);
+            try { recorder.setAudioChannels(1); } catch (Throwable ignored) {}
+            recorder.setOutputFile(out.getAbsolutePath());
+            recorder.prepare();
+            recorder.start();
+
+            new Thread(() -> {
+                try {
+                    Thread.sleep(3000);
+                } catch (InterruptedException ignored) {}
+                try {
+                    recorder.stop();
+                } catch (Exception ignored) {}
+                try {
+                    recorder.reset();
+                    recorder.release();
+                } catch (Exception ignored) {}
+                JSObject ret = new JSObject();
+                ret.put("ok", true);
+                ret.put("filePath", out.getAbsolutePath());
+                call.resolve(ret);
+            }).start();
+        } catch (Exception e) {
+            call.reject("debugTestRecord failed: " + e.getMessage());
+        }
     }
 
     @PluginMethod

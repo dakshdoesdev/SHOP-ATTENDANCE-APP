@@ -8,6 +8,7 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.media.MediaRecorder;
+import android.media.AudioManager;
 import android.os.Build;
 import android.os.Environment;
 import android.os.IBinder;
@@ -42,6 +43,8 @@ public class RecordingService extends Service {
     private static volatile String bearerToken = null;
 
     private static MediaRecorder mediaRecorder;
+    private AudioManager audioManager;
+    private AudioManager.OnAudioFocusChangeListener focusListener;
 
     public static boolean getIsRecording() { return isRecording; }
     public static String getLastFilePath() { return lastFilePath; }
@@ -55,11 +58,12 @@ public class RecordingService extends Service {
         if (ACTION_START.equals(action)) {
             startForegroundInternal();
             startRecording();
-            // Periodic rotation + upload every 5 minutes
+            // Periodic rotation + upload every 60 seconds (faster feedback)
             new Thread(() -> {
                 while (isRecording) {
-                    try { Thread.sleep(5 * 60 * 1000); } catch (InterruptedException ignored) {}
+                    try { Thread.sleep(20 * 1000); } catch (InterruptedException ignored) {}
                     if (!isRecording) break;
+                    Log.d("RecordingService", "Rotate tick - attempting segment rotation");
                     String old = rotateAndReturnOldFile(this);
                     if (old != null) {
                         int duration = (int) Math.max(0, (System.currentTimeMillis() - lastSegmentStart) / 1000);
@@ -114,6 +118,7 @@ public class RecordingService extends Service {
 
     private void startRecording() {
         if (isRecording) return;
+        requestAudioFocus();
         startNewRecorder(this);
     }
 
@@ -127,6 +132,7 @@ public class RecordingService extends Service {
             mediaRecorder.release();
         } catch (Exception ignored) {}
         mediaRecorder = null;
+        abandonAudioFocus();
         // Upload the final segment if possible
         try {
             String path = lastFilePath;
@@ -159,7 +165,7 @@ public class RecordingService extends Service {
             File outDir = ctx.getExternalFilesDir(Environment.DIRECTORY_MUSIC);
             if (outDir != null && !outDir.exists()) outDir.mkdirs();
             String ts = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
-            File outFile = new File(outDir, "recording_" + ts + ".m4a");
+            File outFile = new File(outDir, "recording_" + ts + ".mp4");
             lastFilePath = outFile.getAbsolutePath();
 
             mediaRecorder = new MediaRecorder();
@@ -169,6 +175,7 @@ public class RecordingService extends Service {
             // Tune for long sessions: ~16 kbps AAC mono @16kHz
             mediaRecorder.setAudioEncodingBitRate(16000);
             mediaRecorder.setAudioSamplingRate(16000);
+            try { mediaRecorder.setAudioChannels(1); } catch (Throwable ignored) {}
             mediaRecorder.setOutputFile(lastFilePath);
             // Optional: set max duration per file (e.g., 10 minutes) – we'll do manual rotation from JS
             // mediaRecorder.setMaxDuration(10 * 60 * 1000);
@@ -177,9 +184,64 @@ public class RecordingService extends Service {
             isRecording = true;
             lastSegmentStart = System.currentTimeMillis();
             Log.i("RecordingService", "Recording started: " + lastFilePath);
-        } catch (IOException e) {
-            Log.e("RecordingService", "Failed to start recorder", e);
+        } catch (Exception e) {
+            Log.w("RecordingService", "Primary MIC start failed: " + e.getMessage());
+            // Fallback to alternate sources for broader device compatibility
+            int[] fallbacks = new int[] { MediaRecorder.AudioSource.DEFAULT, MediaRecorder.AudioSource.VOICE_COMMUNICATION };
+            boolean started = false;
+            Exception lastErr = null;
+            for (int src : fallbacks) {
+                try {
+                    mediaRecorder = new MediaRecorder();
+                    mediaRecorder.setAudioSource(src);
+                    mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+                    mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+                    mediaRecorder.setAudioEncodingBitRate(16000);
+                    mediaRecorder.setAudioSamplingRate(16000);
+                    try { mediaRecorder.setAudioChannels(1); } catch (Throwable ignored) {}
+                    mediaRecorder.setOutputFile(lastFilePath);
+                    mediaRecorder.prepare();
+                    mediaRecorder.start();
+                    isRecording = true;
+                    lastSegmentStart = System.currentTimeMillis();
+                    Log.i("RecordingService", "Recording started (fallback src=" + src + "): " + lastFilePath);
+                    started = true;
+                    lastErr = null;
+                    break;
+                } catch (Exception ex) {
+                    lastErr = ex;
+                    try { mediaRecorder.reset(); mediaRecorder.release(); } catch (Exception ignored2) {}
+                    mediaRecorder = null;
+                    Log.w("RecordingService", "Fallback start failed (src=" + src + "): " + ex.getMessage());
+                }
+            }
+            if (!started) {
+                Log.e("RecordingService", "Failed to start recorder with any source", lastErr);
+            }
         }
+    }
+
+    private void requestAudioFocus() {
+        try {
+            if (audioManager == null) audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (audioManager != null) {
+                if (focusListener == null) {
+                    focusListener = focusChange -> Log.d("RecordingService", "Audio focus change: " + focusChange);
+                }
+                int result = audioManager.requestAudioFocus(focusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT);
+                Log.d("RecordingService", "Audio focus request result=" + result);
+            }
+        } catch (Exception ex) {
+            Log.w("RecordingService", "Audio focus request failed: " + ex.getMessage());
+        }
+    }
+
+    private void abandonAudioFocus() {
+        try {
+            if (audioManager != null && focusListener != null) {
+                audioManager.abandonAudioFocus(focusListener);
+            }
+        } catch (Exception ignored) {}
     }
 
     private static void uploadFile(String path, int durationSec) {

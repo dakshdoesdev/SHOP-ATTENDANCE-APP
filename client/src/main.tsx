@@ -2,4 +2,26 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
 
-createRoot(document.getElementById("root")!).render(<App />);
+async function bootstrap() {
+  try {
+    const configUrl = (import.meta as any).env?.VITE_CONFIG_URL as string | undefined;
+    if (configUrl) {
+      const res = await fetch(configUrl, { cache: 'no-store' });
+      if (res.ok) {
+        const cfg = await res.json().catch(() => null);
+        if (cfg && typeof cfg === 'object') {
+          const apiBase = (cfg as any).apiBase as string | undefined;
+          const uploadBase = (cfg as any).uploadBase as string | undefined;
+          try {
+            if (apiBase) localStorage.setItem('apiBase', apiBase);
+            if (uploadBase) localStorage.setItem('uploadBase', uploadBase);
+          } catch {}
+        }
+      }
+    }
+  } catch {}
+
+  createRoot(document.getElementById("root")!).render(<App />);
+}
+
+bootstrap();

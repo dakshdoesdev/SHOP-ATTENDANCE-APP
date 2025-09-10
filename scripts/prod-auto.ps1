@@ -134,9 +134,23 @@ Write-Host "[prod-auto] Updated $envPath"
 # 4) Save URL for reference
 "$(Get-Date -Format o) $publicUrl" | Out-File -FilePath (Join-Path $ProjectRoot "ngrok-url.txt") -Encoding UTF8
 
+# 4b) If Supabase env available, publish config so the UI auto-loads API URL
+if ($env:SUPABASE_URL -and $env:SUPABASE_SERVICE_KEY) {
+  try {
+    Write-Host "[prod-auto] Publishing API config to Supabase Storage ..."
+    $script = Join-Path $ProjectRoot "scripts/update-supabase-config.ps1"
+    if (Test-Path $script) {
+      & $script -SupabaseUrl $env:SUPABASE_URL -ServiceKey $env:SUPABASE_SERVICE_KEY -ApiBase $publicUrl -UploadBase $publicUrl | Write-Output
+    } else {
+      Write-Warning "[prod-auto] update-supabase-config.ps1 not found; skipping publish"
+    }
+  } catch {
+    Write-Warning "[prod-auto] Failed to publish Supabase config: $_"
+  }
+}
+
 # 5) Start production server
 Write-Host "[prod-auto] Starting production server (npm start) ..."
 Start-Process -FilePath "powershell" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"cd '$ProjectRoot'; npm start`"" -WorkingDirectory $ProjectRoot
 
 Write-Host "[prod-auto] All set. Tunnel + server running."
-

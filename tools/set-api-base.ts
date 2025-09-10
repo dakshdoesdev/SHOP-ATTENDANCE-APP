@@ -52,7 +52,7 @@ const clientDir = path.resolve(process.cwd(), 'client');
 const envProdPath = path.join(clientDir, '.env.production');
 const envLocalPath = path.join(clientDir, '.env.local');
 
-const content = `VITE_API_BASE=${apiBase}\nVITE_FORCE_WEB_RECORDER=${forceWebRecorder}\n`;
+const content = `VITE_API_BASE=${apiBase}\nVITE_UPLOAD_BASE=${apiBase}\nVITE_FORCE_WEB_RECORDER=${forceWebRecorder}\n`;
 
 fs.mkdirSync(clientDir, { recursive: true });
 fs.writeFileSync(envProdPath, content, 'utf8');

@@ -17,6 +17,7 @@ import AdminDashboard from "@/pages/admin-dashboard";
 import AdminEmployees from "@/pages/admin-employees";
 import AdminAudio from "@/pages/admin-audio";
 import AdminWorkHours from "@/pages/admin-work-hours";
+import Diagnostics from "@/pages/diagnostics";
 
 function Router() {
   return (
@@ -32,6 +33,9 @@ function Router() {
       <ProtectedRoute path="/admin/employees" component={AdminEmployees} requireRole="admin" />
       <ProtectedRoute path="/admin/work-hours" component={AdminWorkHours} requireRole="admin" />
       <ProtectedRoute path="/admin/audio" component={AdminAudio} requireRole="admin" />
+
+      {/* Diagnostics (unprotected to help before login) */}
+      <Route path="/diagnostics" component={Diagnostics} />
       
       {/* Auth Route */}
       <Route path="/auth" component={AuthPage} />

@@ -6,6 +6,7 @@ import session from "express-session";
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
 import { storage } from "./storage";
+import { getBoundDeviceId, bindDeviceId, unbindDeviceId } from "./device-lock";
 import { User as SelectUser, insertUserSchema } from "@shared/schema";
 import { z } from "zod";
 
@@ -58,6 +59,9 @@ export function setupAuth(app: Express) {
   // If SameSite=None, cookie must be Secure
   const cookieSecure = (process.env.COOKIE_SECURE === 'true') || (cookieSameSite === 'none') || (process.env.NODE_ENV === 'production');
 
+  const sessionDays = parseInt(process.env.SESSION_MAX_AGE_DAYS || '30', 10);
+  const sessionMaxAgeMs = Math.max(1, sessionDays) * 24 * 60 * 60 * 1000;
+
   const sessionSettings: session.SessionOptions = {
     secret: process.env.SESSION_SECRET || "bedi-enterprises-secret-key-2025",
     resave: false,
@@ -67,7 +71,7 @@ export function setupAuth(app: Express) {
       secure: cookieSecure,
       sameSite: cookieSameSite as any,
       httpOnly: true,
-      maxAge: 2 * 60 * 60 * 1000, // 2 hours
+      maxAge: sessionMaxAgeMs,
     },
   };
 
@@ -92,6 +96,14 @@ export function setupAuth(app: Express) {
       const secret = process.env.JWT_SECRET || "upload-secret-2025";
       const payload: any = jwt.verify(token, secret);
       if (!payload?.sub) return next();
+      // Enforce device binding if configured
+      const deviceLock = (process.env.DEVICE_LOCK || 'true').toLowerCase() !== 'false';
+      const boundDid = deviceLock ? getBoundDeviceId(payload.sub) : undefined;
+      const tokenDid = (payload as any).did as string | undefined;
+      if (deviceLock && boundDid && tokenDid && boundDid !== tokenDid) {
+        return next(); // reject bearer auth silently if device mismatch
+      }
+
       storage.getUser(payload.sub)
         .then((user) => {
           if (user) {
@@ -162,12 +174,28 @@ export function setupAuth(app: Express) {
 
       req.login(user, (err) => {
         if (err) return next(err);
+        const deviceLock = (process.env.DEVICE_LOCK || 'true').toLowerCase() !== 'false';
+        const deviceId = (req.headers['x-device-id'] as string) || (req.body?.deviceId as string) || undefined;
+        try {
+          if (deviceLock && deviceId) {
+            const bound = getBoundDeviceId(user.id);
+            if (bound && bound !== deviceId) {
+              return res.status(403).json({ message: "Account already linked to a different device" });
+            }
+            if (!bound) {
+              bindDeviceId(user.id, deviceId);
+            }
+          }
+        } catch {}
         // Also issue a short-lived upload token to enable Android native uploads
         let token: string | undefined = undefined;
         try {
           if (user.role === "employee") {
             const secret = process.env.JWT_SECRET || "upload-secret-2025";
-            token = jwt.sign({ sub: user.id, role: user.role }, secret, { expiresIn: "1d" });
+            const expiresIn = process.env.JWT_EXPIRES_IN || "180d";
+            const payload: any = { sub: user.id, role: user.role };
+            if (deviceId) payload.did = deviceId;
+            token = jwt.sign(payload, secret, { expiresIn });
           }
         } catch {}
         // Do not enforce or update an "already logged in" flag
@@ -194,7 +222,19 @@ export function setupAuth(app: Express) {
     if (!req.isAuthenticated()) return res.sendStatus(401);
     if (req.user?.role !== "employee") return res.status(403).json({ message: "Employee token only" });
     const secret = process.env.JWT_SECRET || "upload-secret-2025";
-    const token = jwt.sign({ sub: req.user.id, role: req.user.role }, secret, { expiresIn: "1d" });
+    const expiresIn = process.env.JWT_EXPIRES_IN || "180d";
+    const deviceLock = (process.env.DEVICE_LOCK || 'true').toLowerCase() !== 'false';
+    const deviceId = (req.headers['x-device-id'] as string) || undefined;
+    if (deviceLock) {
+      const bound = getBoundDeviceId(req.user.id);
+      if (bound && deviceId && bound !== deviceId) {
+        return res.status(403).json({ message: "Account linked to a different device" });
+      }
+      if (!bound && deviceId) bindDeviceId(req.user.id, deviceId);
+    }
+    const payload: any = { sub: req.user.id, role: req.user.role };
+    if (deviceId) payload.did = deviceId;
+    const token = jwt.sign(payload, secret, { expiresIn });
     res.json({ token });
   });
 
@@ -269,6 +309,20 @@ export function setupAuth(app: Express) {
     }
 
     next();
+  });
+
+  // Admin: unbind/reset device for a user
+  app.post("/api/admin/reset-device/:userId", (req, res) => {
+    if (!req.isAuthenticated() || req.user?.role !== "admin") {
+      return res.status(401).json({ message: "Admin access required" });
+    }
+    const { userId } = req.params as any;
+    try {
+      unbindDeviceId(userId);
+      return res.status(200).json({ success: true });
+    } catch (e) {
+      return res.status(500).json({ message: (e as Error).message || 'Failed to reset device' });
+    }
   });
   return sessionMiddleware;
 }

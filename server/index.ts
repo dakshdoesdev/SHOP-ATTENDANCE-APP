@@ -3,8 +3,11 @@ import express, { type Request, Response, NextFunction } from "express";
 import cors from "cors";
 import { registerRoutes } from "./routes";
 import { setupAuth } from "./auth";
-import { createServer } from "http";
 import { setupVite, serveStatic, log } from "./vite";
+import fs from 'fs';
+import path from 'path';
+import http from 'http';
+import https from 'https';
 // DB readiness is optional in memory mode. Import lazily if configured.
 
 const app = express();
@@ -29,8 +32,11 @@ const dynamicCorsOrigin: cors.CorsOptions['origin'] = (origin, callback) => {
     const host = o.hostname;
     // Explicit allowlist or common dev hosts
     if (allowList.has(origin)) return callback(null, true);
-    // Allow ngrok subdomains
+    // Allow common tunnel domains
     if (host.endsWith('.ngrok-free.app')) return callback(null, true);
+    if (host.endsWith('.loca.lt')) return callback(null, true); // localtunnel
+    if (host.endsWith('.trycloudflare.com')) return callback(null, true); // cloudflared quick tunnel
+    if (host.endsWith('.deno.dev')) return callback(null, true); // Deno Deploy
     // Allow typical LAN hosts
     if (/^(10\.|192\.168\.|172\.)/.test(host)) return callback(null, true);
   } catch {}
@@ -73,7 +79,23 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  const server = createServer(app);
+  // Create HTTP or HTTPS server depending on env
+  let server: http.Server | https.Server;
+  const certPath = process.env.TLS_CERT_FILE;
+  const keyPath = process.env.TLS_KEY_FILE;
+  if (certPath && keyPath) {
+    try {
+      const cert = fs.readFileSync(path.resolve(certPath));
+      const key = fs.readFileSync(path.resolve(keyPath));
+      server = https.createServer({ key, cert }, app);
+      log(`HTTPS enabled (cert: ${certPath})`);
+    } catch (e) {
+      log(`failed to enable HTTPS, falling back to HTTP: ${(e as Error)?.message || e}`);
+      server = http.createServer(app);
+    }
+  } else {
+    server = http.createServer(app);
+  }
 
   // Setup authentication FIRST
   const sessionMiddleware = setupAuth(app);
@@ -106,6 +128,7 @@ app.use((req, res, next) => {
 
   const port = parseInt(process.env.PORT || "5000", 10);
   server.listen(port, "0.0.0.0", () => {
-    log(`serving on port ${port}`);
+    const protocol = server instanceof https.Server ? 'https' : 'http';
+    log(`serving on ${protocol}://0.0.0.0:${port}`);
   });
 })();

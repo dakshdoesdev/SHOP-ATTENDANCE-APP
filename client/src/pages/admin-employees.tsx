@@ -20,14 +20,10 @@ import { useToast } from "@/hooks/use-toast";
 const createEmployeeSchema = z.object({
   username: z.string().min(1, "Username is required"),
   password: z.string().min(6, "Password must be at least 6 characters"),
-  employeeId: z.string().min(1, "Employee ID is required"),
-  department: z.string().min(1, "Department is required"),
 });
 
 const editEmployeeSchema = z.object({
   username: z.string().min(1, "Username is required"),
-  employeeId: z.string().min(1, "Employee ID is required"),
-  department: z.string().min(1, "Department is required"),
   password: z.string().min(6, "Password must be at least 6 characters").optional(),
 });
 
@@ -115,8 +111,6 @@ export default function AdminEmployees() {
     defaultValues: {
       username: "",
       password: "",
-      employeeId: "",
-      department: "",
     },
   });
 
@@ -124,8 +118,6 @@ export default function AdminEmployees() {
     resolver: zodResolver(editEmployeeSchema),
     defaultValues: {
       username: "",
-      employeeId: "",
-      department: "",
       password: "",
     },
   });
@@ -149,8 +141,6 @@ export default function AdminEmployees() {
     setEditingEmployee(employee);
     editForm.reset({
       username: employee.username,
-      employeeId: employee.employeeId || "",
-      department: employee.department || "",
       password: "",
     });
     setEditDialogOpen(true);
@@ -199,33 +189,7 @@ export default function AdminEmployees() {
                       )}
                     />
 
-                    <FormField
-                      control={form.control}
-                      name="employeeId"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Employee ID</FormLabel>
-                          <FormControl>
-                            <Input {...field} data-testid="input-new-employee-id" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="department"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Department</FormLabel>
-                          <FormControl>
-                            <Input {...field} data-testid="input-new-department" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+                    
 
                     <FormField
                       control={form.control}
@@ -290,33 +254,7 @@ export default function AdminEmployees() {
                       )}
                     />
 
-                    <FormField
-                      control={editForm.control}
-                      name="employeeId"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Employee ID</FormLabel>
-                          <FormControl>
-                            <Input {...field} data-testid="input-edit-employee-id" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={editForm.control}
-                      name="department"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Department</FormLabel>
-                          <FormControl>
-                            <Input {...field} data-testid="input-edit-department" />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+                    
 
                     <FormField
                       control={editForm.control}
@@ -373,7 +311,6 @@ export default function AdminEmployees() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Employee</TableHead>
-                      <TableHead>Department</TableHead>
                       <TableHead>Join Date</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Actions</TableHead>
@@ -392,7 +329,7 @@ export default function AdminEmployees() {
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell>{employee.department || "N/A"}</TableCell>
+                        
                         <TableCell>
                           {employee.joinDate 
                             ? new Date(employee.joinDate).toLocaleDateString()
@@ -436,7 +373,7 @@ export default function AdminEmployees() {
                     ))}
                     {!employees || employees.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center text-gray-500 py-8">
+                        <TableCell colSpan={4} className="text-center text-gray-500 py-8">
                           No employees found
                         </TableCell>
                       </TableRow>

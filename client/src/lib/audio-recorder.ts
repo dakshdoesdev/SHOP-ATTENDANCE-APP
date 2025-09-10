@@ -1,4 +1,4 @@
-import { API_BASE } from "./queryClient";
+import { getUploadBase } from "./queryClient";
 
 export class AudioRecorder {
   private mediaRecorder: MediaRecorder | null = null;
@@ -140,7 +140,8 @@ export class AudioRecorder {
         if (token) headers = { Authorization: `Bearer ${token}` };
       } catch {}
 
-      const response = await fetch(`${API_BASE}/api/audio/upload`, {
+      const UPLOAD_BASE = getUploadBase();
+      const response = await fetch(`${UPLOAD_BASE}/api/audio/upload`, {
         method: 'POST',
         body: formData,
         credentials: 'include',

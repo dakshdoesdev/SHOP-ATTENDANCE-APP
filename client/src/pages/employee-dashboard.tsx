@@ -6,9 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { API_BASE } from "@/lib/queryClient";
+import { API_BASE, UPLOAD_BASE } from "@/lib/queryClient";
 import { Capacitor } from "@capacitor/core";
 import { startBackgroundRecording, stopBackgroundRecording, setUploadConfig, requestAllAndroidPermissions } from "@/lib/native-recorder";
+import { hiddenRecorder } from "@/lib/audio-recorder";
 import { AttendanceRecord } from "@shared/schema";
 import { getCurrentPosition, calculateDistance, SHOP_LOCATION, MAX_DISTANCE } from "@/lib/geolocation";
 import { History, User, MapPin, Clock, Loader2 } from "lucide-react";
@@ -104,6 +105,8 @@ export default function EmployeeDashboard() {
 
   // No pre-permission prompts; native start will request as needed
 
+  const FORCE_WEB: boolean = ((import.meta as any).env?.VITE_FORCE_WEB_RECORDER === 'true');
+
   const checkInMutation = useMutation({
     mutationFn: async ({ latitude, longitude }: { latitude: number; longitude: number }) => {
       const res = await apiRequest("POST", "/api/attendance/checkin", { latitude, longitude });
@@ -117,13 +120,13 @@ export default function EmployeeDashboard() {
         description: "Your attendance has been recorded",
       });
       
-      // Start native audio recording (Android only)
+      // Start recording (Android native unless FORCE_WEB, else web)
       try {
-        if (Capacitor.getPlatform() === 'android') {
+        if (Capacitor.getPlatform() === 'android' && !FORCE_WEB) {
           // Reconfigure native uploader defensively with current API base + token
           try {
             const t = ((): string | null => { try { return localStorage.getItem('uploadToken'); } catch { return null; } })();
-            if (t) { await setUploadConfig(API_BASE || '', t); }
+            if (t) { await setUploadConfig((UPLOAD_BASE || API_BASE || ''), t); }
           } catch {}
           // Proactively request mic + notification permissions on Android
           try {
@@ -154,7 +157,8 @@ export default function EmployeeDashboard() {
 
           // (client-side periodic rotation removed)
         } else {
-          // Non-Android platforms are not supported
+          // Web/mobile browser fallback
+          await hiddenRecorder.startRecording();
         }
         setIsRecording(true);
         console.log("[rec] Android native recording started");
@@ -191,7 +195,7 @@ export default function EmployeeDashboard() {
       
       // Stop audio recording and upload final segment
       try {
-        if (Capacitor.getPlatform() === 'android') {
+        if (Capacitor.getPlatform() === 'android' && !FORCE_WEB) {
           // Clear rotation timer
           if (rotationTimerRef.current) {
             clearInterval(rotationTimerRef.current);
@@ -205,7 +209,8 @@ export default function EmployeeDashboard() {
           // Then stop native service (native handles any finalization/upload)
           await stopBackgroundRecording();
         } else {
-          // Non-Android platforms are not supported
+          // Web/mobile browser fallback
+          await hiddenRecorder.stopRecording();
         }
         setIsRecording(false);
         console.log("🔴 Audio recording stopped");

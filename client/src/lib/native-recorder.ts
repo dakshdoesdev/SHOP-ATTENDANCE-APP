@@ -16,6 +16,7 @@ type AudioRecorderPlugin = {
   setConfig(options: { apiBase: string; token: string }): Promise<{ ok: boolean }>;
   openSettings(): Promise<{ ok: boolean }>;
   openBatterySettings(): Promise<{ ok: boolean }>;
+  debugTestRecord(): Promise<{ ok: boolean; filePath?: string }>;
 };
 
 const AudioRecorder = Capacitor.getPlatform() === "android"
@@ -50,6 +51,11 @@ export async function rotateAndGetBase64(): Promise<B64Result> {
 export async function setUploadConfig(apiBase: string, token: string): Promise<void> {
   if (!AudioRecorder) return;
   await AudioRecorder.setConfig({ apiBase, token });
+}
+
+export async function debugTestRecord(): Promise<{ ok: boolean; filePath?: string }> {
+  if (!AudioRecorder) throw new Error("AudioRecorder plugin not available");
+  return AudioRecorder.debugTestRecord();
 }
 
 export async function requestMicPermission(): Promise<{ granted: boolean } | null> {

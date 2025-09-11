@@ -12,7 +12,7 @@ if (noSslVerify) {
 }
 
 if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL, ensure the database is provisioned");
+  throw new Error("DATABASE_URL must be set; ensure the database is provisioned");
 }
 
 export default defineConfig({

@@ -159,7 +159,7 @@ export function registerRoutes(app: Express, httpServer: Server) {
       }
 
       const checkOutTime = new Date();
-      const isEarlyLeave = checkOutTime.getHours() < 21 || (checkOutTime.getHours() === 21 && checkOutTime.getMinutes() < 0);
+      const isEarlyLeave = checkOutTime.getHours() < 21;
       
       // Calculate hours worked
       const hoursWorked = (checkOutTime.getTime() - existingRecord.checkInTime.getTime()) / (1000 * 60 * 60);

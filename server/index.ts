@@ -36,7 +36,8 @@ const dynamicCorsOrigin: cors.CorsOptions['origin'] = (origin, callback) => {
     if (host.endsWith('.ngrok-free.app')) return callback(null, true);
     if (host.endsWith('.loca.lt')) return callback(null, true); // localtunnel
     if (host.endsWith('.trycloudflare.com')) return callback(null, true); // cloudflared quick tunnel
-    if (host.endsWith('.deno.dev')) return callback(null, true); // Deno Deploy
+    if (host.endsWith('.deno.dev')) return callback(null, true); // Deno Deploy (legacy)
+    if (host.endsWith('.deno.net')) return callback(null, true); // Deno Deploy (new domains)
     // Allow typical LAN hosts
     if (/^(10\.|192\.168\.|172\.)/.test(host)) return callback(null, true);
   } catch {}

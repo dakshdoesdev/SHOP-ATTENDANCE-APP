@@ -56,6 +56,44 @@ foreach ($p in @(".\.env.local",".\.env.production",".\client\.env.local",".\cli
 
 Write-Host "Updated .env, .env.local, .env.production with $publicUrl"
 
+# Optionally publish current API base to a public JSON (used by the Deno site)
+# Requires env vars:
+#   SUPABASE_URL          e.g. https://mfasiuftsrjvfjyrqjhk.supabase.co
+#   SUPABASE_SERVICE_KEY  Service role key with Storage write access
+try {
+  if ($env:SUPABASE_URL -and $env:SUPABASE_SERVICE_KEY) {
+    $bucket = 'config'
+    $object = 'api.json'
+    $cfgUrl = "$($env:SUPABASE_URL.TrimEnd('/'))/storage/v1/object/public/$bucket/$object"
+    Write-Host "Publishing API config to Supabase Storage: $cfgUrl"
+    & scripts/update-supabase-config.ps1 `
+      -SupabaseUrl $env:SUPABASE_URL `
+      -ServiceKey $env:SUPABASE_SERVICE_KEY `
+      -Bucket $bucket `
+      -Object $object `
+      -ApiBase $publicUrl `
+      -UploadBase $publicUrl | Write-Output
+
+    # Verify that the public JSON reflects the latest URL
+    try {
+      $verifyHeaders = @{ 'Cache-Control' = 'no-cache' }
+      $fetched = Invoke-RestMethod -Uri $cfgUrl -Method GET -Headers $verifyHeaders -TimeoutSec 10
+      $apiBase = ($fetched | Select-Object -ExpandProperty apiBase -ErrorAction SilentlyContinue)
+      $uploadBase = ($fetched | Select-Object -ExpandProperty uploadBase -ErrorAction SilentlyContinue)
+      Write-Host ("Verified config: apiBase={0}, uploadBase={1}" -f $apiBase, $uploadBase)
+      if ($apiBase -ne $publicUrl) {
+        Write-Warning ("Config apiBase does not match current ngrok URL. Config={0} Ngrok={1}" -f $apiBase, $publicUrl)
+      }
+    } catch {
+      Write-Warning "Could not fetch public config to verify update: $($_.Exception.Message)"
+    }
+  } else {
+    Write-Host "SUPABASE_URL / SUPABASE_SERVICE_KEY not set; skipping publish of API config"
+  }
+} catch {
+  Write-Warning "Failed to publish API config: $($_.Exception.Message)"
+}
+
 # Ensure database schema is ready before starting the server
 try {
   Write-Host "Ensuring database schema (users default times) ..."

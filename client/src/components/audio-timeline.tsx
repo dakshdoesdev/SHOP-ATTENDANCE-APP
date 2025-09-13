@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { API_BASE } from "@/lib/queryClient";
+import { getApiBase } from "@/lib/queryClient";
 
 // Renders a waveform timeline with optional start/end time labels
 
@@ -22,7 +22,8 @@ export function AudioTimeline({ fileUrl, startTime, duration, audioRef }: AudioT
   useEffect(() => {
     const analyze = async () => {
       try {
-        const resolved = fileUrl?.startsWith("http") ? fileUrl : `${API_BASE || ""}${fileUrl || ""}`;
+        const base = getApiBase();
+        const resolved = fileUrl?.startsWith("http") ? fileUrl : `${base || ""}${fileUrl || ""}`;
         const res = await fetch(resolved);
         const arrayBuffer = await res.arrayBuffer();
         const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;

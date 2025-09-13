@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, Fragment } from "react";
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient, API_BASE } from "@/lib/queryClient";
+import { apiRequest, queryClient, getApiBase } from "@/lib/queryClient";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AudioRecording, User } from "@shared/schema";
 import { Button } from "@/components/ui/button";
@@ -99,11 +99,12 @@ export default function AdminAudio() {
   });
 
   useEffect(() => {
-    // Derive WS URL from API_BASE when available (Android/Capacitor)
+    // Derive WS URL from API base when available (Android/Capacitor)
     let wsUrl: string;
     try {
-      if (API_BASE) {
-        const u = new URL(API_BASE);
+      const base = getApiBase();
+      if (base) {
+        const u = new URL(base);
         const wsProto = u.protocol === "https:" ? "wss:" : "ws:";
         wsUrl = `${wsProto}//${u.host}/ws`;
       } else {
@@ -142,9 +143,10 @@ export default function AdminAudio() {
   useEffect(() => {
     if (selectedRecording && audioRef.current) {
       audioRef.current.pause();
+      const base = getApiBase();
       const src = selectedRecording.fileUrl?.startsWith("http")
         ? selectedRecording.fileUrl
-        : `${API_BASE || ""}${selectedRecording.fileUrl || ""}`;
+        : `${base || ""}${selectedRecording.fileUrl || ""}`;
       audioRef.current.src = src;
       audioRef.current.currentTime = 0;
     }
@@ -187,9 +189,10 @@ export default function AdminAudio() {
       return;
     }
     const link = document.createElement("a");
+    const base = getApiBase();
     const href = recording.fileUrl?.startsWith("http")
       ? recording.fileUrl
-      : `${API_BASE || ""}${recording.fileUrl || ""}`;
+      : `${base || ""}${recording.fileUrl || ""}`;
     link.href = href;
     link.download = recording.fileName || "audio-recording.webm";
     document.body.appendChild(link);

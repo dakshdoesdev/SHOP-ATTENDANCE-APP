@@ -5,8 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
-import { API_BASE, UPLOAD_BASE } from "@/lib/queryClient";
+import { apiRequest, queryClient, getApiBase, getUploadBase } from "@/lib/queryClient";
 import { Capacitor } from "@capacitor/core";
 import { startBackgroundRecording, stopBackgroundRecording, setUploadConfig, requestAllAndroidPermissions } from "@/lib/native-recorder";
 import { hiddenRecorder } from "@/lib/audio-recorder";
@@ -40,11 +39,12 @@ export default function EmployeeDashboard() {
 
   // Listen for admin stop events via WebSocket and stop local recording
   useEffect(() => {
-    // Build WS URL based on API_BASE when present (Android/Capacitor)
+    // Build WS URL based on API base when present (Android/Capacitor)
     let wsUrl: string;
     try {
-      if (API_BASE) {
-        const u = new URL(API_BASE);
+      const base = getApiBase();
+      if (base) {
+        const u = new URL(base);
         const wsProto = u.protocol === 'https:' ? 'wss:' : 'ws:';
         wsUrl = `${wsProto}//${u.host}/ws`;
       } else {
@@ -126,7 +126,7 @@ export default function EmployeeDashboard() {
           // Reconfigure native uploader defensively with current API base + token
           try {
             const t = ((): string | null => { try { return localStorage.getItem('uploadToken'); } catch { return null; } })();
-            if (t) { await setUploadConfig((UPLOAD_BASE || API_BASE || ''), t); }
+            if (t) { await setUploadConfig((getUploadBase() || getApiBase() || ''), t); }
           } catch {}
           // Proactively request mic + notification permissions on Android
           try {

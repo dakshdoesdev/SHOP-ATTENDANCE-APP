@@ -14,17 +14,81 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useState } from "react";
+import TimePicker from "@/components/time-picker";
 import { ArrowLeft, UserPlus, Edit, Trash2, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest as _api } from "@/lib/queryClient";
+
+function BulkWorkHoursCard() {
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const [applyAll, setApplyAll] = useState(true);
+  const { toast } = useToast();
+  const [pending, setPending] = useState(false);
+
+  async function apply() {
+    try {
+      setPending(true);
+      const body: any = { applyTo: applyAll ? 'all' : 'unsetOnly' };
+      if (start) body.defaultStartTime = start;
+      if (end) body.defaultEndTime = end;
+      if (!body.defaultStartTime && !body.defaultEndTime) {
+        toast({ title: 'Nothing to apply', description: 'Set start and/or end time' });
+        return;
+      }
+      const res = await _api('PATCH', '/api/admin/employees/schedule', body);
+      await res.json();
+      toast({ title: 'Updated', description: 'Default work hours applied' });
+      // best-effort reload list by reloading page (simple)
+      try { (window as any).location?.reload(); } catch {}
+    } catch (e: any) {
+      toast({ title: 'Failed', description: e?.message || String(e), variant: 'destructive' });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Card className="mb-6">
+      <CardHeader>
+        <CardTitle>Default Work Hours</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-wrap items-end gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Company Start Time</label>
+            <TimePicker value={start} onChange={setStart} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Company End Time</label>
+            <TimePicker value={end} onChange={setEnd} />
+          </div>
+          <div className="flex items-center gap-2">
+            <input id="applyAll" type="checkbox" checked={applyAll} onChange={(e) => setApplyAll(e.target.checked)} />
+            <label htmlFor="applyAll" className="text-sm">Apply to all employees (uncheck = only set for employees without custom times)</label>
+          </div>
+          <Button onClick={apply} disabled={pending || (!start && !end)}>
+            {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Apply
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 const createEmployeeSchema = z.object({
   username: z.string().min(1, "Username is required"),
   password: z.string().min(6, "Password must be at least 6 characters"),
+  defaultStartTime: z.string().optional(),
+  defaultEndTime: z.string().optional(),
 });
 
 const editEmployeeSchema = z.object({
   username: z.string().min(1, "Username is required"),
   password: z.string().min(6, "Password must be at least 6 characters").optional(),
+  defaultStartTime: z.string().optional(),
+  defaultEndTime: z.string().optional(),
 });
 
 type CreateEmployeeData = z.infer<typeof createEmployeeSchema>;
@@ -111,6 +175,8 @@ export default function AdminEmployees() {
     defaultValues: {
       username: "",
       password: "",
+      defaultStartTime: "",
+      defaultEndTime: "",
     },
   });
 
@@ -119,6 +185,8 @@ export default function AdminEmployees() {
     defaultValues: {
       username: "",
       password: "",
+      defaultStartTime: "",
+      defaultEndTime: "",
     },
   });
 
@@ -142,6 +210,10 @@ export default function AdminEmployees() {
     editForm.reset({
       username: employee.username,
       password: "",
+      // @ts-ignore backend adds these fields
+      defaultStartTime: (employee as any).defaultStartTime || "",
+      // @ts-ignore
+      defaultEndTime: (employee as any).defaultEndTime || "",
     });
     setEditDialogOpen(true);
   };
@@ -209,6 +281,33 @@ export default function AdminEmployees() {
                       )}
                     />
 
+                    <FormField
+                      control={form.control}
+                      name="defaultStartTime"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Start Time (optional)</FormLabel>
+                          <FormControl>
+                            <TimePicker value={field.value || ""} onChange={field.onChange} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="defaultEndTime"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>End Time (optional)</FormLabel>
+                          <FormControl>
+                            <TimePicker value={field.value || ""} onChange={field.onChange} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
                     <div className="flex space-x-3">
                       <Button 
                         type="submit" 
@@ -270,6 +369,33 @@ export default function AdminEmployees() {
                       )}
                     />
 
+                    <FormField
+                      control={editForm.control}
+                      name="defaultStartTime"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Start Time</FormLabel>
+                          <FormControl>
+                            <TimePicker value={field.value || ""} onChange={field.onChange} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={editForm.control}
+                      name="defaultEndTime"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>End Time</FormLabel>
+                          <FormControl>
+                            <TimePicker value={field.value || ""} onChange={field.onChange} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
                     <div className="flex space-x-3">
                       <Button
                         type="submit"
@@ -312,6 +438,7 @@ export default function AdminEmployees() {
                     <TableRow>
                       <TableHead>Employee</TableHead>
                       <TableHead>Join Date</TableHead>
+                      <TableHead>Work Hours</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Actions</TableHead>
                     </TableRow>
@@ -335,6 +462,14 @@ export default function AdminEmployees() {
                             ? new Date(employee.joinDate).toLocaleDateString()
                             : "N/A"
                           }
+                        </TableCell>
+                        <TableCell>
+                          {(employee as any).defaultStartTime || (employee as any).defaultEndTime ? (
+                            <span className="text-gray-800">{(employee as any).defaultStartTime || '-'} 
+                              {' '}–{' '} {(employee as any).defaultEndTime || '-'}</span>
+                          ) : (
+                            <span className="text-gray-400">not set</span>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Badge 

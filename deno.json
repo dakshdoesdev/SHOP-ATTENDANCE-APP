@@ -1,0 +1,16 @@
+{
+  "tasks": {
+    "serve": "deno run -A deno_main.ts"
+  },
+  "lint": {
+    "rules": {
+      "tags": ["recommended"]
+    }
+  },
+  "fmt": {
+    "useTabs": false,
+    "lineWidth": 100,
+    "indentWidth": 2
+  }
+}
+

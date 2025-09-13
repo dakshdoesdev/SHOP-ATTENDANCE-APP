@@ -108,7 +108,11 @@ export function registerRoutes(app: Express, httpServer: Server) {
       console.log(`✅ Check-in allowed from anywhere - Location: ${latitude}, ${longitude}`);
       
       const checkInTime = new Date();
-      const isLate = checkInTime.getHours() > 9 || (checkInTime.getHours() === 9 && checkInTime.getMinutes() > 15);
+      // Determine expected start time from user profile (HH:MM, 24h). Fallback 09:15
+      const user = await storage.getUser(userId);
+      const expectedStart = (user?.defaultStartTime && typeof user.defaultStartTime === 'string') ? user.defaultStartTime : '09:15';
+      const [sh, sm] = expectedStart.split(':').map((v) => parseInt(v, 10));
+      const isLate = checkInTime.getHours() > (sh || 9) || (checkInTime.getHours() === (sh || 9) && checkInTime.getMinutes() > (sm || 15));
 
       const attendanceRecord = await storage.createAttendanceRecord({
         userId,
@@ -159,7 +163,11 @@ export function registerRoutes(app: Express, httpServer: Server) {
       }
 
       const checkOutTime = new Date();
-      const isEarlyLeave = checkOutTime.getHours() < 21 || (checkOutTime.getHours() === 21 && checkOutTime.getMinutes() < 0);
+      // Determine expected end time from user profile; fallback 21:00
+      const user = await storage.getUser(userId);
+      const expectedEnd = (user?.defaultEndTime && typeof user.defaultEndTime === 'string') ? user.defaultEndTime : '21:00';
+      const [eh, em] = expectedEnd.split(':').map((v) => parseInt(v, 10));
+      const isEarlyLeave = checkOutTime.getHours() < (eh || 21) || (checkOutTime.getHours() === (eh || 21) && checkOutTime.getMinutes() < (em || 0));
       
       // Calculate hours worked
       const hoursWorked = (checkOutTime.getTime() - existingRecord.checkInTime.getTime()) / (1000 * 60 * 60);
@@ -314,7 +322,7 @@ export function registerRoutes(app: Express, httpServer: Server) {
     }
 
     try {
-      const { username, password, employeeId, department } = req.body;
+      const { username, password, employeeId, department, defaultStartTime, defaultEndTime } = req.body;
       
       const existingUser = await storage.getUserByUsername(username);
       if (existingUser) {
@@ -328,6 +336,8 @@ export function registerRoutes(app: Express, httpServer: Server) {
         role: "employee",
         employeeId,
         department,
+        defaultStartTime,
+        defaultEndTime,
       });
 
       res.status(201).json(user);
@@ -343,8 +353,8 @@ export function registerRoutes(app: Express, httpServer: Server) {
     }
 
     try {
-      const { username, employeeId, department, password } = req.body;
-      const updateData: any = { username, employeeId, department };
+      const { username, employeeId, department, password, defaultStartTime, defaultEndTime } = req.body;
+      const updateData: any = { username, employeeId, department, defaultStartTime, defaultEndTime };
       if (password) {
         updateData.password = await hashPassword(password);
       }
@@ -526,6 +536,35 @@ export function registerRoutes(app: Express, httpServer: Server) {
     }
   });
 
+  // Bulk update default work hours for employees
+  app.patch("/api/admin/employees/schedule", async (req, res) => {
+    if (!req.isAuthenticated() || req.user?.role !== "admin") {
+      return res.status(401).json({ message: "Admin access required" });
+    }
+    try {
+      const { defaultStartTime, defaultEndTime, applyTo } = req.body as { defaultStartTime?: string; defaultEndTime?: string; applyTo?: 'all' | 'unsetOnly' };
+      if (!defaultStartTime && !defaultEndTime) {
+        return res.status(400).json({ message: "Provide defaultStartTime and/or defaultEndTime" });
+      }
+      // Fetch employees
+      const users = await storage.getAllUsers();
+      const updates = users.map(async (u) => {
+        const shouldUpdate = applyTo === 'all' || applyTo === undefined || (!u.defaultStartTime && !u.defaultEndTime);
+        if (!shouldUpdate) return null;
+        const patch: any = {};
+        if (defaultStartTime) patch.defaultStartTime = defaultStartTime;
+        if (defaultEndTime) patch.defaultEndTime = defaultEndTime;
+        if (Object.keys(patch).length === 0) return null;
+        return storage.updateUser(u.id, patch);
+      });
+      await Promise.all(updates);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Bulk schedule update error:', error);
+      res.status(500).json({ message: "Failed to update schedules" });
+    }
+  });
+
   // Audio panel routes (require special access)
   app.get("/api/admin/audio/recordings", async (req, res) => {
     if (!req.isAuthenticated() || req.user?.role !== "admin") {
@@ -638,7 +677,7 @@ export function registerRoutes(app: Express, httpServer: Server) {
 }
 
 // Helper function to calculate distance between two coordinates
-function getDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+function getDistance_bad(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371e3; // Earth's radius in meters
   const φ1 = lat1 * Math.PI/180;
   const φ2 = lat2 * Math.PI/180;
@@ -654,3 +693,19 @@ function getDistance(lat1: number, lon1: number, lat2: number, lon2: number): nu
 }
 
 
+// Clean replacement: Haversine distance in meters
+function getDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371e3; // Earth's radius in meters
+  const phi1 = (lat1 * Math.PI) / 180;
+  const phi2 = (lat2 * Math.PI) / 180;
+  const dPhi = ((lat2 - lat1) * Math.PI) / 180;
+  const dLambda = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(dPhi / 2) * Math.sin(dPhi / 2) +
+    Math.cos(phi1) * Math.cos(phi2) *
+    Math.sin(dLambda / 2) * Math.sin(dLambda / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
+}

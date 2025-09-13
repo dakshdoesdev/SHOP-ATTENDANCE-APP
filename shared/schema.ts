@@ -14,6 +14,9 @@ export const users = pgTable("users", {
   joinDate: timestamp("join_date").defaultNow(),
   isActive: boolean("is_active").default(true),
   isLoggedIn: boolean("is_logged_in").default(false),
+  // Optional default work hours per employee in HH:MM 24h format
+  defaultStartTime: text("default_start_time"),
+  defaultEndTime: text("default_end_time"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

@@ -12,8 +12,7 @@ const adminLoginSchema = {
 };
 
 type AdminLoginData = typeof adminLoginSchema;
-import { getQueryFn, apiRequest, queryClient } from "../lib/queryClient";
-import { API_BASE, UPLOAD_BASE } from "../lib/queryClient";
+import { getQueryFn, apiRequest, queryClient, getApiBase, getUploadBase } from "../lib/queryClient";
 import { setUploadConfig } from "@/lib/native-recorder";
 import { Capacitor } from "@capacitor/core";
 import { useToast } from "@/hooks/use-toast";
@@ -67,7 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               try { return localStorage.getItem("uploadToken"); } catch { return null; }
             })();
             if (token) {
-              await setUploadConfig((UPLOAD_BASE || API_BASE || ""), token);
+              await setUploadConfig((getUploadBase() || getApiBase() || ""), token);
               return;
             }
           } catch {}
@@ -76,7 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const res = await apiRequest("POST", "/api/auth/upload-token");
             const { token } = await res.json();
             try { localStorage.setItem("uploadToken", token); } catch {}
-            await setUploadConfig((UPLOAD_BASE || API_BASE || ""), token);
+            await setUploadConfig((getUploadBase() || getApiBase() || ""), token);
           } catch {
             // non-fatal
           }
@@ -103,7 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           try { return localStorage.getItem("uploadToken"); } catch { return null; }
         })();
         if (token) {
-          await setUploadConfig((UPLOAD_BASE || API_BASE || ""), token);
+          await setUploadConfig((getUploadBase() || getApiBase() || ""), token);
           return;
         }
       } catch {}
@@ -111,7 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const res = await apiRequest("POST", "/api/auth/upload-token");
         const { token } = await res.json();
         try { localStorage.setItem("uploadToken", token); } catch {}
-        await setUploadConfig((UPLOAD_BASE || API_BASE || ""), token);
+        await setUploadConfig((getUploadBase() || getApiBase() || ""), token);
       } catch {
         // non-fatal
       }

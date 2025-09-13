@@ -4,10 +4,15 @@ import { eq, desc, and, sql } from "drizzle-orm";
 import session from "express-session";
 import connectPg from "connect-pg-simple";
 import fs from "fs";
-import path from "path";
+import path, { dirname } from "path";
+import { fileURLToPath } from "url";
 import type { IStorage } from "./storage";
 
 const PostgresSessionStore = connectPg(session);
+
+// ESM-safe __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 export class DatabaseStorage implements IStorage {
   public sessionStore: session.Store;
@@ -367,4 +372,3 @@ export class DatabaseStorage implements IStorage {
 }
 
 export const storage = new DatabaseStorage();
-

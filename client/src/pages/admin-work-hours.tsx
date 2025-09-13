@@ -24,10 +24,9 @@ import {
 export default function AdminWorkHours() {
   const { user } = useAuth();
   
-  // Default to previous month (YYYY-MM format)
+  // Default to current month (YYYY-MM format)
   const now = new Date();
-  const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const currentMonth = lastMonth.toISOString().slice(0, 7);
+  const currentMonth = now.toISOString().slice(0, 7);
   const [selectedMonth, setSelectedMonth] = useState(currentMonth);
 
   const { data: workHoursData, isLoading, error } = useQuery<MonthlyWorkHoursResponse>({
@@ -39,12 +38,13 @@ export default function AdminWorkHours() {
     enabled: !!selectedMonth,
   });
 
-  // Generate month options for the last 12 months
+  // Generate month options for recent months only (current and last 2)
   const monthOptions = useMemo(() => {
     const options = [];
     const now = new Date();
-    
-    for (let i = 0; i < 12; i++) {
+    const monthsBack = 3; // show current + previous 2 months
+
+    for (let i = 0; i < monthsBack; i++) {
       const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const monthStr = date.toISOString().slice(0, 7);
       const displayName = date.toLocaleDateString('en-US', { 

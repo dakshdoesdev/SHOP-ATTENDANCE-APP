@@ -46,6 +46,19 @@ const dynamicCorsOrigin: cors.CorsOptions['origin'] = (origin, callback) => {
 
 app.use(cors({ origin: dynamicCorsOrigin, credentials: true }));
 
+// Ensure CORS headers are present on all responses for allowed origins
+app.use((req, res, next) => {
+  const origin = req.headers.origin as string | undefined;
+  if (isAllowedOrigin(origin)) {
+    if (origin) {
+      res.header('Access-Control-Allow-Origin', origin);
+      res.header('Vary', 'Origin');
+    }
+    res.header('Access-Control-Allow-Credentials', 'true');
+  }
+  next();
+});
+
 // Handle preflight for all routes
 app.options("*", cors({ credentials: true, origin: dynamicCorsOrigin }));
 

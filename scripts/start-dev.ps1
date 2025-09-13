@@ -66,13 +66,16 @@ try {
     $object = 'api.json'
     $cfgUrl = "$($env:SUPABASE_URL.TrimEnd('/'))/storage/v1/object/public/$bucket/$object"
     Write-Host "Publishing API config to Supabase Storage: $cfgUrl"
-    & scripts/update-supabase-config.ps1 `
-      -SupabaseUrl $env:SUPABASE_URL `
-      -ServiceKey $env:SUPABASE_SERVICE_KEY `
-      -Bucket $bucket `
-      -Object $object `
-      -ApiBase $publicUrl `
-      -UploadBase $publicUrl | Write-Output
+    # Publish using direct REST call (avoids path issues with external script)
+    $uri = "$($env:SUPABASE_URL.TrimEnd('/'))/storage/v1/object/$bucket/$object"
+    $body = @{ apiBase = $publicUrl; uploadBase = $publicUrl; updatedAt = (Get-Date -Format o) } | ConvertTo-Json -Depth 3
+    $headers = @{
+      'Authorization' = "Bearer $($env:SUPABASE_SERVICE_KEY)"
+      'Content-Type'  = 'application/json'
+      'x-upsert'      = 'true'
+    }
+    Write-Host "[supabase] PUT $uri"
+    Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $body -ErrorAction Stop | Out-Null
 
     # Verify that the public JSON reflects the latest URL
     try {

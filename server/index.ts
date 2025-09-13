@@ -49,6 +49,40 @@ app.use(cors({ origin: dynamicCorsOrigin, credentials: true }));
 // Handle preflight for all routes
 app.options("*", cors({ credentials: true, origin: dynamicCorsOrigin }));
 
+// Defensive preflight handler to ensure CORS headers are present even if other middleware short-circuits
+function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true; // non-CORS request
+  try {
+    const o = new URL(origin);
+    const host = o.hostname;
+    if (allowList.has(origin)) return true;
+    if (host.endsWith('.ngrok-free.app')) return true;
+    if (host.endsWith('.loca.lt')) return true;
+    if (host.endsWith('.trycloudflare.com')) return true;
+    if (host.endsWith('.deno.dev')) return true;
+    if (host.endsWith('.deno.net')) return true;
+    if (/^(10\.|192\.168\.|172\.)/.test(host)) return true;
+  } catch {}
+  return false;
+}
+
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    const origin = req.headers.origin as string | undefined;
+    if (isAllowedOrigin(origin)) {
+      if (origin) {
+        res.header('Access-Control-Allow-Origin', origin);
+        res.header('Vary', 'Origin');
+      }
+      res.header('Access-Control-Allow-Credentials', 'true');
+      res.header('Access-Control-Allow-Methods', (req.headers['access-control-request-method'] as string) || 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+      res.header('Access-Control-Allow-Headers', (req.headers['access-control-request-headers'] as string) || 'Content-Type, Authorization, X-Requested-With, X-Device-Id');
+      return res.sendStatus(204);
+    }
+  }
+  next();
+});
+
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
